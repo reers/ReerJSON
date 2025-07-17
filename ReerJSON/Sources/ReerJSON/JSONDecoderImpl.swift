@@ -1,28 +1,29 @@
 import Foundation
 import yyjson
+import JJLISO8601DateFormatter
 
 // MARK: - JSONDecoderImpl
 
 final class JSONDecoderImpl: Decoder {
-    let value: yyjson_val
-    let containers: JSONDecodingStorage
-    let keyDecodingStrategy: ReerJSONDecoder.KeyDecodingStrategy
-    let dataDecodingStrategy: ReerJSONDecoder.DataDecodingStrategy
-    let dateDecodingStrategy: ReerJSONDecoder.DateDecodingStrategy
-    let nonConformingFloatDecodingStrategy: ReerJSONDecoder.NonConformingFloatDecodingStrategy
+//    let value: yyjson_val
+    private let valuePointer: UnsafeMutablePointer<yyjson_val>?
+//    let containers: JSONDecodingStorage
+    let keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy
+    let dataDecodingStrategy: JSONDecoder.DataDecodingStrategy
+    let dateDecodingStrategy: JSONDecoder.DateDecodingStrategy
+    let nonConformingFloatDecodingStrategy: JSONDecoder.NonConformingFloatDecodingStrategy
     
     var codingPath: [CodingKey] = []
     var userInfo: [CodingUserInfoKey: Any]
     
-    init(value: yyjson_val, 
-         containers: JSONDecodingStorage,
-         keyDecodingStrategy: ReerJSONDecoder.KeyDecodingStrategy,
-         dataDecodingStrategy: ReerJSONDecoder.DataDecodingStrategy,
-         dateDecodingStrategy: ReerJSONDecoder.DateDecodingStrategy,
-         nonConformingFloatDecodingStrategy: ReerJSONDecoder.NonConformingFloatDecodingStrategy,
+    init(valuePointer: UnsafeMutablePointer<yyjson_val>,
+         keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy,
+         dataDecodingStrategy: JSONDecoder.DataDecodingStrategy,
+         dateDecodingStrategy: JSONDecoder.DateDecodingStrategy,
+         nonConformingFloatDecodingStrategy: JSONDecoder.NonConformingFloatDecodingStrategy,
          userInfo: [CodingUserInfoKey: Any]) {
-        self.value = value
-        self.containers = containers
+        self.valuePointer = valuePointer
+//        self.containers = containers
         self.keyDecodingStrategy = keyDecodingStrategy
         self.dataDecodingStrategy = dataDecodingStrategy
         self.dateDecodingStrategy = dateDecodingStrategy
@@ -47,423 +48,371 @@ final class JSONDecoderImpl: Decoder {
     }
     
     func singleValueContainer() throws -> SingleValueDecodingContainer {
-        return JSONSingleValueDecodingContainer(
-            value: value,
-            decoder: self
-        )
+        return self
+    }
+    
+    private func createTypeMismatchError(type: Any.Type, for path: [CodingKey]) -> DecodingError {
+        return DecodingError.typeMismatch(type, .init(
+            codingPath: path,
+            debugDescription: "Expected to decode \(type) but found \(debugDataTypeDescription) instead."
+        ))
+    }
+    
+    private var debugDataTypeDescription : String {
+        let type = YYJSONType(rawValue: yyjson_get_type(valuePointer)) ?? .none
+        switch type {
+        case .string: return "a string"
+        case .number: return "number"
+        case .bool: return "bool"
+        case .null: return "null"
+        case .object: return "a dictionary"
+        case .array: return "an array"
+        default: return "an unknown"
+        }
     }
 }
 
-// MARK: - JSONKeyedDecodingContainer
+// MARK: - SingleValueDecodingContainer
 
-struct JSONKeyedDecodingContainer<Key: CodingKey>: KeyedDecodingContainerProtocol {
-    let value: yyjson_val
-    let decoder: JSONDecoderImpl
-    let keyDecodingStrategy: ReerJSONDecoder.KeyDecodingStrategy
+extension JSONDecoderImpl: SingleValueDecodingContainer {
+    func decodeNil() -> Bool {
+        return yyjson_is_null(valuePointer)
+    }
+
+    func decode(_: Bool.Type) throws -> Bool {
+        guard yyjson_is_bool(valuePointer) else {
+            throw createTypeMismatchError(type: Bool.self, for: codingPath)
+        }
+        return yyjson_get_bool(valuePointer)
+    }
+
+    func decode(_: String.Type) throws -> String {
+        guard let cCharPointer = yyjson_get_str(valuePointer) else {
+            throw createTypeMismatchError(type: String.self, for: codingPath)
+        }
+        return String(cString: cCharPointer)
+    }
+
+    func decode(_: Double.Type) throws -> Double {
+        guard yyjson_is_num(valuePointer) else {
+            throw createTypeMismatchError(type: Double.self, for: codingPath)
+        }
+        return yyjson_get_num(valuePointer)
+    }
+
+    func decode(_: Float.Type) throws -> Float {
+        guard yyjson_is_num(valuePointer) else {
+            throw createTypeMismatchError(type: Float.self, for: codingPath)
+        }
+        let doubleValue = yyjson_get_num(valuePointer)
+        guard let floatValue = Float(exactly: doubleValue) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
+            ))
+        }
+        return floatValue
+    }
+
+    func decode(_: Int.Type) throws -> Int {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: Int8.Type) throws -> Int8 {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: Int16.Type) throws -> Int16 {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: Int32.Type) throws -> Int32 {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: Int64.Type) throws -> Int64 {
+        try decodeSignedInteger()
+    }
+  
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func decode(_: Int128.Type) throws -> Int128 {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: UInt.Type) throws -> UInt {
+        try decodeUnsignedInteger()
+    }
+
+    func decode(_: UInt8.Type) throws -> UInt8 {
+        try decodeUnsignedInteger()
+    }
+
+    func decode(_: UInt16.Type) throws -> UInt16 {
+        try decodeUnsignedInteger()
+    }
+
+    func decode(_: UInt32.Type) throws -> UInt32 {
+        try decodeUnsignedInteger()
+    }
+
+    func decode(_: UInt64.Type) throws -> UInt64 {
+        try decodeUnsignedInteger()
+    }
     
-    var codingPath: [CodingKey] { return decoder.codingPath }
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func decode(_: UInt128.Type) throws -> UInt128 {
+        try decodeUnsignedInteger()
+    }
+
+    func decode<T: Decodable>(_ type: T.Type) throws -> T {
+        return try unbox(as: type)
+    }
     
-    var allKeys: [Key] {
-        var keys: [Key] = []
-        var mutableValue = value
+    @inline(__always)
+    private func decodeSignedInteger<T: SignedInteger>() throws -> T {
+        guard yyjson_is_sint(valuePointer) else {
+            throw createTypeMismatchError(type: Int.self, for: codingPath)
+        }
+        let value = yyjson_get_sint(valuePointer)
+        guard let int = T(exactly: value) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription: "Number \(value) is not representable in Swift."
+            ))
+        }
+        return int
+    }
+    
+    @inline(__always)
+    private func decodeUnsignedInteger<T: UnsignedInteger>() throws -> T {
+        guard yyjson_is_uint(valuePointer) else {
+            throw createTypeMismatchError(type: Int.self, for: codingPath)
+        }
+        let value = yyjson_get_uint(valuePointer)
+        guard let uint = T(exactly: value) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription: "Number \(value) is not representable in Swift."
+            ))
+        }
+        return uint
+    }
+    
+    @inline(__always)
+    private func unbox<T: Decodable>(as type: T.Type) throws -> T {
+        if type == Date.self {
+            return try unboxDate() as! T
+        }
+        if type == Data.self {
+            return try unboxData() as! T
+        }
+        if type == URL.self {
+            return try unboxURL() as! T
+        }
+        if type == Decimal.self {
+            return try unboxDecimal() as! T
+        }
+        if T.self is StringDecodableDictionary.Type {
+            return try unboxDictionary()
+        }
+
+        return try type.init(from: self)
+    }
+    
+    private func unboxDate() throws -> Date {
+        switch dateDecodingStrategy {
+        case .deferredToDate:
+            return try Date(from: self)
+        case .secondsSince1970:
+            let double = try decode(Double.self)
+            return Date(timeIntervalSince1970: double)
+        case .millisecondsSince1970:
+            let double = try decode(Double.self)
+            return Date(timeIntervalSince1970: double / 1000.0)
+        case .iso8601:
+            let string = try decode(String.self)
+            guard let date = _iso8601Formatter.date(from: string) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Expected date string to be ISO8601-formatted."
+                ))
+            }
+            return date
+        case .formatted(let formatter):
+            let string = try decode(String.self)
+            guard let date = formatter.date(from: string) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Date string does not match format expected by formatter."
+                ))
+            }
+            return date
+        case .custom(let closure):
+            return try closure(self)
+        @unknown default:
+            fatalError()
+        }
+    }
+    
+    private func unboxData() throws -> Data {
+        switch dataDecodingStrategy {
+        case .deferredToData:
+            return try Data(from: self)
+        case .base64:
+            let string = try decode(String.self)
+            guard let data = Data(base64Encoded: string) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Encountered Data is not valid Base64."
+                ))
+            }
+            return data
+        case .custom(let closure):
+            return try closure(self)
+        @unknown default:
+            fatalError()
+        }
+    }
+
+    private func unboxURL() throws -> URL {
+        let string = try decode(String.self)
+        guard let url = URL(string: string) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription: "Invalid URL string."
+            ))
+        }
+        return url
+    }
+    
+    private func unboxDecimal() throws -> Decimal {
+        if let cString = yyjson_get_str(valuePointer), let decimal = Decimal(string: String(cString: cString)) {
+            return decimal
+        }
+        
+        guard yyjson_is_num(valuePointer) else {
+            throw createTypeMismatchError(type: Decimal.self, for: codingPath)
+        }
+        
+        let subtype = YYJSONSubtype(rawValue: yyjson_get_subtype(valuePointer))
+        
+        switch subtype {
+        case .uint:
+            return Decimal(yyjson_get_uint(valuePointer))
+        case .sint:
+            return Decimal(yyjson_get_sint(valuePointer))
+        case .real:
+            let doubleValue = yyjson_get_real(valuePointer)
+            guard doubleValue.isFinite else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Cannot convert non-finite floating point \(doubleValue) to Decimal."
+                ))
+            }
+            return Decimal(doubleValue)
+        default:
+            throw createTypeMismatchError(type: Decimal.self, for: codingPath)
+        }
+    }
+    
+    private func unboxDictionary<T: Decodable>() throws -> T {
+        guard let dictType = T.self as? StringDecodableDictionary.Type else {
+            preconditionFailure("Must only be called if T implements StringDecodableDictionary")
+        }
+        
+        guard yyjson_is_obj(valuePointer) else {
+            throw DecodingError.typeMismatch([String: Decodable].self, .init(
+                codingPath: codingPath,
+                debugDescription: "Expected to decode \([String: Decodable].self) but found \(debugDataTypeDescription) instead."
+            ))
+        }
+        
+        var result = [String: Decodable]()
+        
+        let objSize = yyjson_obj_size(valuePointer)
+        result.reserveCapacity(Int(objSize))
         
         var iter = yyjson_obj_iter()
+        guard yyjson_obj_iter_init(valuePointer, &iter) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription: "Failed to initialize object iterator."
+            ))
+        }
         
-        yyjson_obj_iter_init(&mutableValue, &iter)
         while let keyPtr = yyjson_obj_iter_next(&iter) {
-            if let keyStr = yyjson_get_str(keyPtr) {
-                if let codingKey = Key(stringValue: String(cString: keyStr)) {
-                    keys.append(codingKey)
-                }
+            guard let keyCString = yyjson_get_str(keyPtr) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Object key is not a valid string."
+                ))
             }
+            let key = String(cString: keyCString)
+            
+            guard let valuePtr = yyjson_obj_iter_get_val(keyPtr) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Failed to get value for key '\(key)'."
+                ))
+            }
+            // TODO: - let keyPath = codingPath + [_CodingKey(stringValue: key)!]
+            let keyPath = codingPath
+            
+            //  TODO: - 创建新的decoder来解码值, 性能????
+            let valueDecoder = JSONDecoderImpl(
+                valuePointer: valuePtr,
+                keyDecodingStrategy: keyDecodingStrategy,
+                dataDecodingStrategy: dataDecodingStrategy,
+                dateDecodingStrategy: dateDecodingStrategy,
+                nonConformingFloatDecodingStrategy: nonConformingFloatDecodingStrategy,
+                userInfo: userInfo
+            )
+            valueDecoder.codingPath = keyPath
+            
+            let decodedValue = try dictType.elementType.init(from: valueDecoder)
+            result[key] = decodedValue
         }
         
-        return keys
-    }
-    
-    func contains(_ key: Key) -> Bool {
-        var mutableValue = value
-        return key.stringValue.withCString { keyStr in
-            return yyjson_obj_get(&mutableValue, keyStr) != nil
-        }
-    }
-    
-    func decodeNil(forKey key: Key) throws -> Bool {
-        var mutableValue = value
-        return key.stringValue.withCString { keyStr in
-            guard let val = yyjson_obj_get(&mutableValue, keyStr) else { return true }
-            return yyjson_is_null(val)
-        }
-    }
-    
-    func decode(_ type: Bool.Type, forKey key: Key) throws -> Bool {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: String.Type, forKey key: Key) throws -> String {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: Double.Type, forKey key: Key) throws -> Double {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: Float.Type, forKey key: Key) throws -> Float {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: Int.Type, forKey key: Key) throws -> Int {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: Int8.Type, forKey key: Key) throws -> Int8 {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: Int16.Type, forKey key: Key) throws -> Int16 {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: Int32.Type, forKey key: Key) throws -> Int32 {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: Int64.Type, forKey key: Key) throws -> Int64 {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: UInt.Type, forKey key: Key) throws -> UInt {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: UInt8.Type, forKey key: Key) throws -> UInt8 {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: UInt16.Type, forKey key: Key) throws -> UInt16 {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: UInt32.Type, forKey key: Key) throws -> UInt32 {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode(_ type: UInt64.Type, forKey key: Key) throws -> UInt64 {
-        return try _decode(type, forKey: key)
-    }
-    
-    func decode<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> T {
-        return try _decode(type, forKey: key)
-    }
-    
-    func nestedContainer<NestedKey: CodingKey>(keyedBy type: NestedKey.Type, forKey key: Key) throws -> KeyedDecodingContainer<NestedKey> {
-        let nestedValue = try getValue(forKey: key)
-        let nestedDecoder = JSONDecoderImpl(
-            value: nestedValue,
-            containers: decoder.containers,
-            keyDecodingStrategy: decoder.keyDecodingStrategy,
-            dataDecodingStrategy: decoder.dataDecodingStrategy,
-            dateDecodingStrategy: decoder.dateDecodingStrategy,
-            nonConformingFloatDecodingStrategy: decoder.nonConformingFloatDecodingStrategy,
-            userInfo: decoder.userInfo
-        )
-        return try nestedDecoder.container(keyedBy: type)
-    }
-    
-    func nestedUnkeyedContainer(forKey key: Key) throws -> UnkeyedDecodingContainer {
-        let nestedValue = try getValue(forKey: key)
-        let nestedDecoder = JSONDecoderImpl(
-            value: nestedValue,
-            containers: decoder.containers,
-            keyDecodingStrategy: decoder.keyDecodingStrategy,
-            dataDecodingStrategy: decoder.dataDecodingStrategy,
-            dateDecodingStrategy: decoder.dateDecodingStrategy,
-            nonConformingFloatDecodingStrategy: decoder.nonConformingFloatDecodingStrategy,
-            userInfo: decoder.userInfo
-        )
-        return try nestedDecoder.unkeyedContainer()
-    }
-    
-    func superDecoder() throws -> Decoder {
-        return try superDecoder(forKey: JSONKey(stringValue: "super")! as! Key)
-    }
-    
-    func superDecoder(forKey key: Key) throws -> Decoder {
-        let superValue = try getValue(forKey: key)
-        return JSONDecoderImpl(
-            value: superValue,
-            containers: decoder.containers,
-            keyDecodingStrategy: decoder.keyDecodingStrategy,
-            dataDecodingStrategy: decoder.dataDecodingStrategy,
-            dateDecodingStrategy: decoder.dateDecodingStrategy,
-            nonConformingFloatDecodingStrategy: decoder.nonConformingFloatDecodingStrategy,
-            userInfo: decoder.userInfo
-        )
-    }
-    
-    private func _decode<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> T {
-        let value = try getValue(forKey: key)
-        let unboxer = _ReerJSONDecoder(
-            value: value,
-            containers: decoder.containers,
-            keyDecodingStrategy: decoder.keyDecodingStrategy,
-            dataDecodingStrategy: decoder.dataDecodingStrategy,
-            dateDecodingStrategy: decoder.dateDecodingStrategy,
-            nonConformingFloatDecodingStrategy: decoder.nonConformingFloatDecodingStrategy,
-            userInfo: decoder.userInfo
-        )
-        return try unboxer.unbox(value, as: type)
-    }
-    
-    private func getValue(forKey key: Key) throws -> yyjson_val {
-        var mutableValue = value
-        return key.stringValue.withCString { keyStr in
-            guard let val = yyjson_obj_get(&mutableValue, keyStr) else {
-                // 返回一个空的 yyjson_val
-                return yyjson_val()
-            }
-            return val.pointee
-        }
+        return result as! T
     }
 }
 
-// MARK: - JSONUnkeyedDecodingContainer
-
-struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
-    let value: yyjson_val
-    let decoder: JSONDecoderImpl
-    
-    var codingPath: [CodingKey] { return decoder.codingPath }
-    
-    var count: Int? {
-        var mutableValue = value
-        return Int(yyjson_arr_size(&mutableValue))
-    }
-    
-    var isAtEnd: Bool {
-        return currentIndex >= (count ?? 0)
-    }
-    
-    private(set) var currentIndex: Int = 0
-    
-    mutating func decodeNil() throws -> Bool {
-        let val = try getCurrentValue()
-        var mutableVal = val
-        return yyjson_is_null(&mutableVal)
-    }
-    
-    mutating func decode(_ type: Bool.Type) throws -> Bool {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: String.Type) throws -> String {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: Double.Type) throws -> Double {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: Float.Type) throws -> Float {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: Int.Type) throws -> Int {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: Int8.Type) throws -> Int8 {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: Int16.Type) throws -> Int16 {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: Int32.Type) throws -> Int32 {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: Int64.Type) throws -> Int64 {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: UInt.Type) throws -> UInt {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: UInt8.Type) throws -> UInt8 {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: UInt16.Type) throws -> UInt16 {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: UInt32.Type) throws -> UInt32 {
-        return try _decode(type)
-    }
-    
-    mutating func decode(_ type: UInt64.Type) throws -> UInt64 {
-        return try _decode(type)
-    }
-    
-    mutating func decode<T: Decodable>(_ type: T.Type) throws -> T {
-        return try _decode(type)
-    }
-    
-    mutating func nestedContainer<NestedKey: CodingKey>(keyedBy type: NestedKey.Type) throws -> KeyedDecodingContainer<NestedKey> {
-        let nestedValue = try getCurrentValue()
-        let nestedDecoder = JSONDecoderImpl(
-            value: nestedValue,
-            containers: decoder.containers,
-            keyDecodingStrategy: decoder.keyDecodingStrategy,
-            dataDecodingStrategy: decoder.dataDecodingStrategy,
-            dateDecodingStrategy: decoder.dateDecodingStrategy,
-            nonConformingFloatDecodingStrategy: decoder.nonConformingFloatDecodingStrategy,
-            userInfo: decoder.userInfo
-        )
-        currentIndex += 1
-        return try nestedDecoder.container(keyedBy: type)
-    }
-    
-    mutating func nestedUnkeyedContainer() throws -> UnkeyedDecodingContainer {
-        let nestedValue = try getCurrentValue()
-        let nestedDecoder = JSONDecoderImpl(
-            value: nestedValue,
-            containers: decoder.containers,
-            keyDecodingStrategy: decoder.keyDecodingStrategy,
-            dataDecodingStrategy: decoder.dataDecodingStrategy,
-            dateDecodingStrategy: decoder.dateDecodingStrategy,
-            nonConformingFloatDecodingStrategy: decoder.nonConformingFloatDecodingStrategy,
-            userInfo: decoder.userInfo
-        )
-        currentIndex += 1
-        return try nestedDecoder.unkeyedContainer()
-    }
-    
-    mutating func superDecoder() throws -> Decoder {
-        let superValue = try getCurrentValue()
-        currentIndex += 1
-        return JSONDecoderImpl(
-            value: superValue,
-            containers: decoder.containers,
-            keyDecodingStrategy: decoder.keyDecodingStrategy,
-            dataDecodingStrategy: decoder.dataDecodingStrategy,
-            dateDecodingStrategy: decoder.dateDecodingStrategy,
-            nonConformingFloatDecodingStrategy: decoder.nonConformingFloatDecodingStrategy,
-            userInfo: decoder.userInfo
-        )
-    }
-    
-    private mutating func _decode<T: Decodable>(_ type: T.Type) throws -> T {
-        let value = try getCurrentValue()
-        let unboxer = _ReerJSONDecoder(
-            value: value,
-            containers: decoder.containers,
-            keyDecodingStrategy: decoder.keyDecodingStrategy,
-            dataDecodingStrategy: decoder.dataDecodingStrategy,
-            dateDecodingStrategy: decoder.dateDecodingStrategy,
-            nonConformingFloatDecodingStrategy: decoder.nonConformingFloatDecodingStrategy,
-            userInfo: decoder.userInfo
-        )
-        currentIndex += 1
-        return try unboxer.unbox(value, as: type)
-    }
-    
-    private mutating func getCurrentValue() throws -> yyjson_val {
-        var mutableValue = value
-        guard let val = yyjson_arr_get(&mutableValue, currentIndex) else {
-            // 返回一个空的 yyjson_val
-            return yyjson_val()
-        }
-        return val.pointee
-    }
+enum YYJSONType: UInt8 {
+    case none = 0
+    case raw = 1
+    case null = 2
+    case bool = 3
+    case number = 4
+    case string = 5
+    case array = 6
+    case object = 7
 }
 
-// MARK: - JSONSingleValueDecodingContainer
+struct YYJSONSubtype: RawRepresentable, Equatable {
+    let rawValue: UInt8
+    
+    init(rawValue: UInt8) {
+        self.rawValue = rawValue
+    }
+    static let none = YYJSONSubtype(rawValue: 0 << 3)
+    static let `false` = YYJSONSubtype(rawValue: 0 << 3)
+    static let `true` = YYJSONSubtype(rawValue: 1 << 3)
+    static let uint = YYJSONSubtype(rawValue: 0 << 3)
+    static let sint = YYJSONSubtype(rawValue: 1 << 3)
+    static let real = YYJSONSubtype(rawValue: 2 << 3)
+    static let noesc = YYJSONSubtype(rawValue: 1 << 3)
+}
 
-struct JSONSingleValueDecodingContainer: SingleValueDecodingContainer {
-    let value: yyjson_val
-    let decoder: JSONDecoderImpl
-    
-    var codingPath: [CodingKey] { return decoder.codingPath }
-    
-    func decodeNil() -> Bool {
-        var mutableValue = value
-        return yyjson_is_null(&mutableValue)
-    }
-    
-    func decode(_ type: Bool.Type) throws -> Bool {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: String.Type) throws -> String {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: Double.Type) throws -> Double {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: Float.Type) throws -> Float {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: Int.Type) throws -> Int {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: Int8.Type) throws -> Int8 {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: Int16.Type) throws -> Int16 {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: Int32.Type) throws -> Int32 {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: Int64.Type) throws -> Int64 {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: UInt.Type) throws -> UInt {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: UInt8.Type) throws -> UInt8 {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: UInt16.Type) throws -> UInt16 {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: UInt32.Type) throws -> UInt32 {
-        return try _decode(type)
-    }
-    
-    func decode(_ type: UInt64.Type) throws -> UInt64 {
-        return try _decode(type)
-    }
-    
-    func decode<T: Decodable>(_ type: T.Type) throws -> T {
-        return try _decode(type)
-    }
-    
-    private func _decode<T: Decodable>(_ type: T.Type) throws -> T {
-        let unboxer = _ReerJSONDecoder(
-            value: value,
-            containers: decoder.containers,
-            keyDecodingStrategy: decoder.keyDecodingStrategy,
-            dataDecodingStrategy: decoder.dataDecodingStrategy,
-            dateDecodingStrategy: decoder.dateDecodingStrategy,
-            nonConformingFloatDecodingStrategy: decoder.nonConformingFloatDecodingStrategy,
-            userInfo: decoder.userInfo
-        )
-        return try unboxer.unbox(value, as: type)
-    }
-} 
+fileprivate var _iso8601Formatter: JJLISO8601DateFormatter = {
+    let formatter = JJLISO8601DateFormatter()
+    formatter.formatOptions = .withInternetDateTime
+    return formatter
+}()
+
+protocol StringDecodableDictionary {
+    static var elementType: Decodable.Type { get }
+}
+
+extension Dictionary : StringDecodableDictionary where Key == String, Value: Decodable {
+    static var elementType: Decodable.Type { return Value.self }
+}

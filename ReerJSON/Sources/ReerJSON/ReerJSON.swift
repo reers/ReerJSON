@@ -162,7 +162,9 @@ open class ReerJSONDecoder {
             yyjson_doc_free(doc)
         }
         
-        let impl = JSONDecoderImpl(valuePointer: yyjson_doc_get_root(doc), userInfo: userInfo, options: options)
+        var json = JSON(pointer: yyjson_doc_get_root(doc))
+        
+        let impl = JSONDecoderImpl(json: json, userInfo: userInfo, options: options)
         return try impl.unbox(as: type)
     }
     

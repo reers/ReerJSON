@@ -8,22 +8,21 @@ final class JSONDecoderImpl: Decoder {
     var userInfo: [CodingUserInfoKey : Any]
     
 //    let value: yyjson_val
-    private let valuePointer: UnsafeMutablePointer<yyjson_val>?
+    private let json: JSON
 //    let containers: JSONDecodingStorage
     let options: ReerJSONDecoder.Options
     
     var codingPath: [CodingKey] = []
     
-    init(valuePointer: UnsafeMutablePointer<yyjson_val>, userInfo: [CodingUserInfoKey: Any], options: ReerJSONDecoder.Options) {
-        self.valuePointer = valuePointer
+    init(json: JSON, userInfo: [CodingUserInfoKey: Any], options: ReerJSONDecoder.Options) {
+        self.json = json
 //        self.containers = containers
         self.userInfo = userInfo
         self.options = options
     }
     
     func container<Key: CodingKey>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> {
-        let type = YYJSONType(rawValue: yyjson_get_type(valuePointer)) ?? .none
-        switch type {
+        switch json.type {
         case .object:
             let container = try KeyedContainer<Key>(impl: self)
             return KeyedDecodingContainer(container)
@@ -41,8 +40,7 @@ final class JSONDecoderImpl: Decoder {
     }
     
     func unkeyedContainer() throws -> UnkeyedDecodingContainer {
-        let type = YYJSONType(rawValue: yyjson_get_type(valuePointer)) ?? .none
-        switch type {
+        switch json.type {
         case .array:
             return UnkeyedContainer(impl: self)
         case .null:
@@ -70,8 +68,7 @@ final class JSONDecoderImpl: Decoder {
     }
     
     private var debugDataTypeDescription : String {
-        let type = YYJSONType(rawValue: yyjson_get_type(valuePointer)) ?? .none
-        switch type {
+        switch json.type {
         case .string: return "a string"
         case .number: return "number"
         case .bool: return "bool"
@@ -87,35 +84,35 @@ final class JSONDecoderImpl: Decoder {
 
 extension JSONDecoderImpl: SingleValueDecodingContainer {
     func decodeNil() -> Bool {
-        return yyjson_is_null(valuePointer)
+        return json.isNull
     }
 
     func decode(_: Bool.Type) throws -> Bool {
-        guard yyjson_is_bool(valuePointer) else {
+        guard let bool = json.bool else {
             throw createTypeMismatchError(type: Bool.self, for: codingPath)
         }
-        return yyjson_get_bool(valuePointer)
+        return bool
     }
 
     func decode(_: String.Type) throws -> String {
-        guard let cCharPointer = yyjson_get_str(valuePointer) else {
+        guard let string = json.string else {
             throw createTypeMismatchError(type: String.self, for: codingPath)
         }
-        return String(cString: cCharPointer)
+        return string
     }
 
     func decode(_: Double.Type) throws -> Double {
-        guard yyjson_is_num(valuePointer) else {
+        guard let double = json.double else {
             throw createTypeMismatchError(type: Double.self, for: codingPath)
         }
-        return yyjson_get_num(valuePointer)
+        return double
     }
 
     func decode(_: Float.Type) throws -> Float {
-        guard yyjson_is_num(valuePointer) else {
+        guard json.isNumber else {
             throw createTypeMismatchError(type: Float.self, for: codingPath)
         }
-        let doubleValue = yyjson_get_num(valuePointer)
+        let doubleValue = json.numberValue
         guard let floatValue = Float(exactly: doubleValue) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
@@ -181,10 +178,10 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     
     @inline(__always)
     private func decodeSignedInteger<T: SignedInteger>() throws -> T {
-        guard yyjson_is_sint(valuePointer) else {
-            throw createTypeMismatchError(type: Int.self, for: codingPath)
+        guard json.isSignedInteger else {
+            throw createTypeMismatchError(type: T.self, for: codingPath)
         }
-        let value = yyjson_get_sint(valuePointer)
+        let value = json.signedIntegerValue
         guard let int = T(exactly: value) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
@@ -196,10 +193,10 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     
     @inline(__always)
     private func decodeUnsignedInteger<T: UnsignedInteger>() throws -> T {
-        guard yyjson_is_uint(valuePointer) else {
-            throw createTypeMismatchError(type: Int.self, for: codingPath)
+        guard json.isUnsignedInteger else {
+            throw createTypeMismatchError(type: T.self, for: codingPath)
         }
-        let value = yyjson_get_uint(valuePointer)
+        let value = json.unsignedIntegerValue
         guard let uint = T(exactly: value) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
@@ -297,19 +294,17 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
     
     private func unboxDecimal() throws -> Decimal {
-        guard yyjson_is_num(valuePointer) else {
+        guard json.isNull else {
             throw createTypeMismatchError(type: Decimal.self, for: codingPath)
         }
         
-        let subtype = YYJSONSubtype(rawValue: yyjson_get_subtype(valuePointer))
-        
-        switch subtype {
+        switch json.subtype {
         case .uint:
-            return Decimal(yyjson_get_uint(valuePointer))
+            return Decimal(json.unsignedIntegerValue)
         case .sint:
-            return Decimal(yyjson_get_sint(valuePointer))
+            return Decimal(json.signedIntegerValue)
         case .real:
-            let doubleValue = yyjson_get_real(valuePointer)
+            let doubleValue = json.realValue
             guard doubleValue.isFinite else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -327,7 +322,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
             preconditionFailure("Must only be called if T implements StringDecodableDictionary")
         }
         
-        guard yyjson_is_obj(valuePointer) else {
+        guard json.isObject else {
             throw DecodingError.typeMismatch([String: Any].self, .init(
                 codingPath: codingPath,
                 debugDescription: "Expected to decode \([String: Any].self) but found \(debugDataTypeDescription) instead."
@@ -336,11 +331,11 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
         
         var result = [String: Any]()
         
-        let objSize = yyjson_obj_size(valuePointer)
+        let objSize = yyjson_obj_size(json.pointer)
         result.reserveCapacity(Int(objSize))
         
         var iter = yyjson_obj_iter()
-        guard yyjson_obj_iter_init(valuePointer, &iter) else {
+        guard yyjson_obj_iter_init(json.pointer, &iter) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Failed to initialize object iterator."
@@ -362,12 +357,13 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
                     debugDescription: "Failed to get value for key '\(key)'."
                 ))
             }
+#warning("fix")
             // TODO: - let keyPath = codingPath + [_CodingKey(stringValue: key)!]
             let keyPath = codingPath
             
             //  TODO: - 创建新的decoder来解码值, 性能????
             let valueDecoder = JSONDecoderImpl(
-                valuePointer: valuePtr,
+                json: json,
                 userInfo: userInfo,
                 options: options
             )
@@ -388,17 +384,17 @@ extension JSONDecoderImpl {
         typealias Key = K
 
         let impl: JSONDecoderImpl
-        let dictionary: [String: UnsafeMutablePointer<yyjson_val>]
+        let dictionary: [String: JSON]
 
-        static func stringify(impl: JSONDecoderImpl) throws -> [String: UnsafeMutablePointer<yyjson_val>] {
+        static func stringify(impl: JSONDecoderImpl) throws -> [String: JSON] {
             var iter = yyjson_obj_iter()
-            guard yyjson_obj_iter_init(impl.valuePointer, &iter) else {
+            guard yyjson_obj_iter_init(impl.json.pointer, &iter) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: impl.codingPath,
                     debugDescription: "Failed to initialize object iterator."
                 ))
             }
-            var result: [String: UnsafeMutablePointer<yyjson_val>] = [:]
+            var result: [String: JSON] = [:]
             while let keyPtr = yyjson_obj_iter_next(&iter) {
                 guard let keyCString = yyjson_get_str(keyPtr) else {
                     throw DecodingError.dataCorrupted(.init(
@@ -414,8 +410,9 @@ extension JSONDecoderImpl {
                         debugDescription: "Failed to get value for key '\(key)'."
                     ))
                 }
-                result[key] = valuePtr
+                result[key] = JSON(pointer: valuePtr)
             }
+            return result
         }
 
         init(impl: JSONDecoderImpl) throws {
@@ -436,71 +433,69 @@ extension JSONDecoderImpl {
         }
 
         func decodeNil(forKey key: K) throws -> Bool {
-            let valuePointer = try getValue(forKey: key)
-            return yyjson_is_null(valuePointer)
+            return try getValue(forKey: key).isNull
         }
 
         func decode(_ type: Bool.Type, forKey key: K) throws -> Bool {
-            let valuePointer = try getValue(forKey: key)
-
-            guard yyjson_is_bool(valuePointer) else {
+            let jsonValue = try getValue(forKey: key)
+            guard let bool = jsonValue.bool else {
                 throw createTypeMismatchError(type: Bool.self, for: codingPath)
             }
-            return yyjson_get_bool(valuePointer)
+            return bool
         }
 
         func decodeIfPresent(_ type: Bool.Type, forKey key: K) throws -> Bool? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            guard yyjson_is_bool(valuePointer) else {
+            guard let bool = jsonValue.bool else {
                 throw createTypeMismatchError(type: Bool.self, for: codingPath)
             }
-            return yyjson_get_bool(valuePointer)
+            return bool
         }
 
         func decode(_ type: String.Type, forKey key: K) throws -> String {
-            let valuePointer = try getValue(forKey: key)
-            guard let cCharPointer = yyjson_get_str(valuePointer) else {
+            let jsonValue = try getValue(forKey: key)
+            guard let string = jsonValue.string else {
                 throw createTypeMismatchError(type: String.self, for: codingPath)
             }
-            return String(cString: cCharPointer)
+            return string
         }
 
         func decodeIfPresent(_ type: String.Type, forKey key: K) throws -> String? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            guard let cCharPointer = yyjson_get_str(valuePointer) else {
+            guard let string = jsonValue.string else {
                 throw createTypeMismatchError(type: String.self, for: codingPath)
             }
-            return String(cString: cCharPointer)
+            return string
         }
 
         func decode(_: Double.Type, forKey key: K) throws -> Double {
-            let valuePointer = try getValue(forKey: key)
-            guard yyjson_is_num(valuePointer) else {
+            let jsonValue = try getValue(forKey: key)
+            guard let double = jsonValue.double else {
                 throw createTypeMismatchError(type: Double.self, for: codingPath)
             }
-            return yyjson_get_num(valuePointer)
+            return double
         }
 
         func decodeIfPresent(_: Double.Type, forKey key: K) throws -> Double? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            guard yyjson_is_num(valuePointer) else {
+            guard let double = jsonValue.double else {
                 throw createTypeMismatchError(type: Double.self, for: codingPath)
             }
-            return yyjson_get_num(valuePointer)
+            return double
         }
 
         func decode(_: Float.Type, forKey key: K) throws -> Float {
-            let valuePointer = try getValue(forKey: key)
-            guard yyjson_is_num(valuePointer) else {
+            let json = try getValue(forKey: key)
+            guard json.isNumber else {
                 throw createTypeMismatchError(type: Float.self, for: codingPath)
             }
-            let doubleValue = yyjson_get_num(valuePointer)
+            let doubleValue = json.numberValue
             guard let floatValue = Float(exactly: doubleValue) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -710,7 +705,7 @@ extension JSONDecoderImpl {
         }
 
         @inline(__always)
-        private func getValue(forKey key: some CodingKey) throws -> UnsafeMutablePointer<yyjson_val> {
+        private func getValue(forKey key: some CodingKey) throws -> JSON {
             guard let value = dictionary[key.stringValue] else {
                 throw DecodingError.keyNotFound(key, .init(
                     codingPath: codingPath,
@@ -721,7 +716,7 @@ extension JSONDecoderImpl {
         }
 
         @inline(__always)
-        private func getValueIfPresent(forKey key: some CodingKey) -> UnsafeMutablePointer<yyjson_val>? {
+        private func getValueIfPresent(forKey key: some CodingKey) -> JSON? {
             dictionary[key.stringValue]
         }
 

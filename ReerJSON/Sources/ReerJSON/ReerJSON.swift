@@ -123,7 +123,7 @@ open class ReerJSONDecoder {
     }
 
     /// Options set on the top-level encoder to pass down the decoding hierarchy.
-    fileprivate struct _Options {
+    struct Options {
         var dateDecodingStrategy: JSONDecoder.DateDecodingStrategy = .deferredToDate
         var dataDecodingStrategy: JSONDecoder.DataDecodingStrategy = .base64
         var nonConformingFloatDecodingStrategy: JSONDecoder.NonConformingFloatDecodingStrategy = .throw
@@ -133,7 +133,7 @@ open class ReerJSONDecoder {
     }
 
     /// The options set on the top-level decoder.
-    fileprivate var options = _Options()
+    fileprivate var options = Options()
     fileprivate let optionsLock = LockedState<Void>()
 
     // MARK: - Constructing a JSON Decoder

@@ -7,7 +7,33 @@
 
 import yyjson
 
-struct JSON {
+enum YYJSONType: UInt8 {
+    case none = 0
+    case raw = 1
+    case null = 2
+    case bool = 3
+    case number = 4
+    case string = 5
+    case array = 6
+    case object = 7
+}
+
+struct YYJSONSubtype: RawRepresentable, Equatable {
+    let rawValue: UInt8
+    
+    init(rawValue: UInt8) {
+        self.rawValue = rawValue
+    }
+    static let none = YYJSONSubtype(rawValue: 0 << 3)
+    static let `false` = YYJSONSubtype(rawValue: 0 << 3)
+    static let `true` = YYJSONSubtype(rawValue: 1 << 3)
+    static let uint = YYJSONSubtype(rawValue: 0 << 3)
+    static let sint = YYJSONSubtype(rawValue: 1 << 3)
+    static let real = YYJSONSubtype(rawValue: 2 << 3)
+    static let noesc = YYJSONSubtype(rawValue: 1 << 3)
+}
+
+final class JSON {
     let pointer: UnsafeMutablePointer<yyjson_val>?
     
     init(pointer: UnsafeMutablePointer<yyjson_val>?) {

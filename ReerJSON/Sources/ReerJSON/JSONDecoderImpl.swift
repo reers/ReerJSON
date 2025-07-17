@@ -5,26 +5,45 @@ import JJLISO8601DateFormatter
 // MARK: - JSONDecoderImpl
 
 final class JSONDecoderImpl: Decoder {
+    
     var userInfo: [CodingUserInfoKey : Any]
     
 //    let value: yyjson_val
-    private let json: JSON
+    private let root: JSON
 //    let containers: JSONDecodingStorage
     let options: ReerJSONDecoder.Options
     
-    var codingPath: [CodingKey] = []
+    var codingPathNode: CodingPathNode
+    var codingPath: [CodingKey] {
+        codingPathNode.path
+    }
     
-    init(json: JSON, userInfo: [CodingUserInfoKey: Any], options: ReerJSONDecoder.Options) {
-        self.json = json
+    init(json: JSON, userInfo: [CodingUserInfoKey: Any], codingPathNode: CodingPathNode, options: ReerJSONDecoder.Options) {
+        self.root = json
+        push(value: json)
+        self.codingPathNode = codingPathNode
 //        self.containers = containers
         self.userInfo = userInfo
         self.options = options
     }
     
+    var values: ContiguousArray<JSON> = []
+    
+    @inline(__always)
+    var topValue : JSON { values.last! }
+    
+    func push(value: __owned JSON) {
+        self.values.append(value)
+    }
+    
+    func popValue() {
+        self.values.removeLast()
+    }
+    
     func container<Key: CodingKey>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> {
-        switch json.type {
+        switch topValue.type {
         case .object:
-            let container = try KeyedContainer<Key>(impl: self)
+            let container = try KeyedContainer<Key>(impl: self, codingPathNode: codingPathNode)
             return KeyedDecodingContainer(container)
         case .null:
             throw DecodingError.valueNotFound([String: Any].self, DecodingError.Context(
@@ -40,7 +59,7 @@ final class JSONDecoderImpl: Decoder {
     }
     
     func unkeyedContainer() throws -> UnkeyedDecodingContainer {
-        switch json.type {
+        switch topValue.type {
         case .array:
             return UnkeyedContainer(impl: self)
         case .null:
@@ -68,7 +87,7 @@ final class JSONDecoderImpl: Decoder {
     }
     
     private var debugDataTypeDescription : String {
-        switch json.type {
+        switch topValue.type {
         case .string: return "a string"
         case .number: return "number"
         case .bool: return "bool"
@@ -78,136 +97,28 @@ final class JSONDecoderImpl: Decoder {
         default: return "an unknown"
         }
     }
-}
-
-// MARK: - SingleValueDecodingContainer
-
-extension JSONDecoderImpl: SingleValueDecodingContainer {
-    func decodeNil() -> Bool {
-        return json.isNull
-    }
-
-    func decode(_: Bool.Type) throws -> Bool {
-        guard let bool = json.bool else {
-            throw createTypeMismatchError(type: Bool.self, for: codingPath)
-        }
-        return bool
-    }
-
-    func decode(_: String.Type) throws -> String {
-        guard let string = json.string else {
-            throw createTypeMismatchError(type: String.self, for: codingPath)
-        }
-        return string
-    }
-
-    func decode(_: Double.Type) throws -> Double {
-        guard let double = json.double else {
-            throw createTypeMismatchError(type: Double.self, for: codingPath)
-        }
-        return double
-    }
-
-    func decode(_: Float.Type) throws -> Float {
-        guard json.isNumber else {
-            throw createTypeMismatchError(type: Float.self, for: codingPath)
-        }
-        let doubleValue = json.numberValue
-        guard let floatValue = Float(exactly: doubleValue) else {
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: codingPath,
-                debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
-            ))
-        }
-        return floatValue
-    }
-
-    func decode(_: Int.Type) throws -> Int {
-        try decodeSignedInteger()
-    }
-
-    func decode(_: Int8.Type) throws -> Int8 {
-        try decodeSignedInteger()
-    }
-
-    func decode(_: Int16.Type) throws -> Int16 {
-        try decodeSignedInteger()
-    }
-
-    func decode(_: Int32.Type) throws -> Int32 {
-        try decodeSignedInteger()
-    }
-
-    func decode(_: Int64.Type) throws -> Int64 {
-        try decodeSignedInteger()
-    }
-  
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-    func decode(_: Int128.Type) throws -> Int128 {
-        try decodeSignedInteger()
-    }
-
-    func decode(_: UInt.Type) throws -> UInt {
-        try decodeUnsignedInteger()
-    }
-
-    func decode(_: UInt8.Type) throws -> UInt8 {
-        try decodeUnsignedInteger()
-    }
-
-    func decode(_: UInt16.Type) throws -> UInt16 {
-        try decodeUnsignedInteger()
-    }
-
-    func decode(_: UInt32.Type) throws -> UInt32 {
-        try decodeUnsignedInteger()
-    }
-
-    func decode(_: UInt64.Type) throws -> UInt64 {
-        try decodeUnsignedInteger()
-    }
     
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-    func decode(_: UInt128.Type) throws -> UInt128 {
-        try decodeUnsignedInteger()
-    }
+    // Instead of creating a new JSONDecoderImpl for passing to methods that take Decoder arguments, wrap the access in this method, which temporarily mutates this JSONDecoderImpl instance with the nested value and its coding path.
+    @inline(__always)
+    func with<T>(value: JSON, path: CodingPathNode?, perform closure: () throws -> T) rethrows -> T {
+        let oldPath = codingPathNode
+        if let path {
+            codingPathNode = path
+        }
+        push(value: value)
 
-    func decode<T: Decodable>(_ type: T.Type) throws -> T {
-        return try unbox(as: type)
+        defer {
+            if path != nil {
+                codingPathNode = oldPath
+            }
+            popValue()
+        }
+
+        return try closure()
     }
     
     @inline(__always)
-    private func decodeSignedInteger<T: SignedInteger>() throws -> T {
-        guard json.isSignedInteger else {
-            throw createTypeMismatchError(type: T.self, for: codingPath)
-        }
-        let value = json.signedIntegerValue
-        guard let int = T(exactly: value) else {
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: codingPath,
-                debugDescription: "Number \(value) is not representable in Swift."
-            ))
-        }
-        return int
-    }
-    
-    @inline(__always)
-    private func decodeUnsignedInteger<T: UnsignedInteger>() throws -> T {
-        guard json.isUnsignedInteger else {
-            throw createTypeMismatchError(type: T.self, for: codingPath)
-        }
-        let value = json.unsignedIntegerValue
-        guard let uint = T(exactly: value) else {
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: codingPath,
-                debugDescription: "Number \(value) is not representable in Swift."
-            ))
-        }
-        return uint
-    }
-    
-    @inline(__always)
-    func unbox<T: Decodable>(as type: T.Type) throws -> T {
+    func unbox<T: Decodable>(_ value: JSON, as type: T.Type) throws -> T {
         if type == Date.self {
             return try unboxDate() as! T
         }
@@ -294,17 +205,17 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
     
     private func unboxDecimal() throws -> Decimal {
-        guard json.isNull else {
+        guard topValue.isNull else {
             throw createTypeMismatchError(type: Decimal.self, for: codingPath)
         }
         
-        switch json.subtype {
+        switch topValue.subtype {
         case .uint:
-            return Decimal(json.unsignedIntegerValue)
+            return Decimal(topValue.unsignedIntegerValue)
         case .sint:
-            return Decimal(json.signedIntegerValue)
+            return Decimal(topValue.signedIntegerValue)
         case .real:
-            let doubleValue = json.realValue
+            let doubleValue = topValue.realValue
             guard doubleValue.isFinite else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -322,7 +233,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
             preconditionFailure("Must only be called if T implements StringDecodableDictionary")
         }
         
-        guard json.isObject else {
+        guard topValue.isObject else {
             throw DecodingError.typeMismatch([String: Any].self, .init(
                 codingPath: codingPath,
                 debugDescription: "Expected to decode \([String: Any].self) but found \(debugDataTypeDescription) instead."
@@ -331,11 +242,11 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
         
         var result = [String: Any]()
         
-        let objSize = yyjson_obj_size(json.pointer)
+        let objSize = yyjson_obj_size(topValue.pointer)
         result.reserveCapacity(Int(objSize))
         
         var iter = yyjson_obj_iter()
-        guard yyjson_obj_iter_init(json.pointer, &iter) else {
+        guard yyjson_obj_iter_init(topValue.pointer, &iter) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Failed to initialize object iterator."
@@ -363,11 +274,12 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
             
             //  TODO: - 创建新的decoder来解码值, 性能????
             let valueDecoder = JSONDecoderImpl(
-                json: json,
+                json: topValue,
                 userInfo: userInfo,
+                codingPathNode: .root,
                 options: options
             )
-            valueDecoder.codingPath = keyPath
+//            valueDecoder.codingPath = keyPath
             
             let decodedValue = try dictType.elementType.init(from: valueDecoder)
             result[key] = decodedValue
@@ -377,6 +289,136 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
 }
 
+// MARK: - SingleValueDecodingContainer
+
+extension JSONDecoderImpl: SingleValueDecodingContainer {
+    func decodeNil() -> Bool {
+        return topValue.isNull
+    }
+
+    func decode(_: Bool.Type) throws -> Bool {
+        guard let bool = topValue.bool else {
+            throw createTypeMismatchError(type: Bool.self, for: codingPath)
+        }
+        return bool
+    }
+
+    func decode(_: String.Type) throws -> String {
+        guard let string = topValue.string else {
+            throw createTypeMismatchError(type: String.self, for: codingPath)
+        }
+        return string
+    }
+
+    func decode(_: Double.Type) throws -> Double {
+        guard let double = topValue.double else {
+            throw createTypeMismatchError(type: Double.self, for: codingPath)
+        }
+        return double
+    }
+
+    func decode(_: Float.Type) throws -> Float {
+        guard topValue.isNumber else {
+            throw createTypeMismatchError(type: Float.self, for: codingPath)
+        }
+        let doubleValue = topValue.numberValue
+        guard let floatValue = Float(exactly: doubleValue) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
+            ))
+        }
+        return floatValue
+    }
+
+    func decode(_: Int.Type) throws -> Int {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: Int8.Type) throws -> Int8 {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: Int16.Type) throws -> Int16 {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: Int32.Type) throws -> Int32 {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: Int64.Type) throws -> Int64 {
+        try decodeSignedInteger()
+    }
+  
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func decode(_: Int128.Type) throws -> Int128 {
+        try decodeSignedInteger()
+    }
+
+    func decode(_: UInt.Type) throws -> UInt {
+        try decodeUnsignedInteger()
+    }
+
+    func decode(_: UInt8.Type) throws -> UInt8 {
+        try decodeUnsignedInteger()
+    }
+
+    func decode(_: UInt16.Type) throws -> UInt16 {
+        try decodeUnsignedInteger()
+    }
+
+    func decode(_: UInt32.Type) throws -> UInt32 {
+        try decodeUnsignedInteger()
+    }
+
+    func decode(_: UInt64.Type) throws -> UInt64 {
+        try decodeUnsignedInteger()
+    }
+    
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func decode(_: UInt128.Type) throws -> UInt128 {
+        try decodeUnsignedInteger()
+    }
+
+    func decode<T: Decodable>(_ type: T.Type) throws -> T {
+        return try unbox(topValue, as: type)
+    }
+    
+    @inline(__always)
+    private func decodeSignedInteger<T: SignedInteger>() throws -> T {
+        guard topValue.isSignedInteger else {
+            throw createTypeMismatchError(type: T.self, for: codingPath)
+        }
+        let value = topValue.signedIntegerValue
+        guard let int = T(exactly: value) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription: "Number \(value) is not representable in Swift."
+            ))
+        }
+        return int
+    }
+    
+    @inline(__always)
+    private func decodeUnsignedInteger<T: UnsignedInteger>() throws -> T {
+        guard topValue.isUnsignedInteger else {
+            throw createTypeMismatchError(type: T.self, for: codingPath)
+        }
+        let value = topValue.unsignedIntegerValue
+        guard let uint = T(exactly: value) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription: "Number \(value) is not representable in Swift."
+            ))
+        }
+        return uint
+    }
+
+    
+    
+}
+
 // MARK: - KeyedDecodingContainerProtocol
 
 extension JSONDecoderImpl {
@@ -384,11 +426,12 @@ extension JSONDecoderImpl {
         typealias Key = K
 
         let impl: JSONDecoderImpl
+        let codingPathNode: CodingPathNode
         let dictionary: [String: JSON]
 
         static func stringify(impl: JSONDecoderImpl) throws -> [String: JSON] {
             var iter = yyjson_obj_iter()
-            guard yyjson_obj_iter_init(impl.json.pointer, &iter) else {
+            guard yyjson_obj_iter_init(impl.topValue.pointer, &iter) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: impl.codingPath,
                     debugDescription: "Failed to initialize object iterator."
@@ -410,13 +453,14 @@ extension JSONDecoderImpl {
                         debugDescription: "Failed to get value for key '\(key)'."
                     ))
                 }
-                result[key] = JSON(pointer: valuePtr)
+                result[key]._setIfNil(to: JSON(pointer: valuePtr))
             }
             return result
         }
 
-        init(impl: JSONDecoderImpl) throws {
+        init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) throws {
             self.impl = impl
+            self.codingPathNode = codingPathNode
             self.dictionary = try Self.stringify(impl: impl)
         }
 
@@ -506,13 +550,13 @@ extension JSONDecoderImpl {
         }
 
         func decodeIfPresent(_: Float.Type, forKey key: K) throws -> Float? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            guard yyjson_is_num(valuePointer) else {
+            guard jsonValue.isNumber else {
                 throw createTypeMismatchError(type: Float.self, for: codingPath)
             }
-            let doubleValue = yyjson_get_num(valuePointer)
+            let doubleValue = jsonValue.numberValue
             guard let floatValue = Float(exactly: doubleValue) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -523,93 +567,93 @@ extension JSONDecoderImpl {
         }
         
         func decode(_: Int.Type, forKey key: K) throws -> Int {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeSignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decodeIfPresent(_: Int.Type, forKey key: K) throws -> Int? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(valuePointer)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decode(_: Int8.Type, forKey key: K) throws -> Int8 {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeSignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decodeIfPresent(_: Int8.Type, forKey key: K) throws -> Int8? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(valuePointer)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decode(_: Int16.Type, forKey key: K) throws -> Int16 {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeSignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decodeIfPresent(_: Int16.Type, forKey key: K) throws -> Int16? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(valuePointer)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decode(_: Int32.Type, forKey key: K) throws -> Int32 {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeSignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decodeIfPresent(_: Int32.Type, forKey key: K) throws -> Int32? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(valuePointer)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decode(_: Int64.Type, forKey key: K) throws -> Int64 {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeSignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeSignedInteger(jsonValue)
         }
       
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
         func decode(_: Int128.Type, forKey key: K) throws -> Int128 {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeSignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decodeIfPresent(_: Int64.Type, forKey key: K) throws -> Int64? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(valuePointer)
+            return try decodeSignedInteger(jsonValue)
         }
 
         func decode(_: UInt.Type, forKey key: K) throws -> UInt {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeUnsignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeUnsignedInteger(jsonValue)
         }
 
         func decodeIfPresent(_: UInt.Type, forKey key: K) throws -> UInt? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(valuePointer)
+            return try decodeUnsignedInteger(jsonValue)
         }
 
         func decode(_: UInt8.Type, forKey key: K) throws -> UInt8 {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeUnsignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeUnsignedInteger(jsonValue)
         }
 
         func decodeIfPresent(_: UInt8.Type, forKey key: K) throws -> UInt8? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(valuePointer)
+            return try decodeUnsignedInteger(jsonValue)
         }
 
         func decode(_: UInt16.Type, forKey key: K) throws -> UInt16 {
@@ -618,55 +662,52 @@ extension JSONDecoderImpl {
         }
 
         func decodeIfPresent(_: UInt16.Type, forKey key: K) throws -> UInt16? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(valuePointer)
+            return try decodeUnsignedInteger(jsonValue)
         }
 
         func decode(_: UInt32.Type, forKey key: K) throws -> UInt32 {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeUnsignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeUnsignedInteger(jsonValue)
         }
 
         func decodeIfPresent(_: UInt32.Type, forKey key: K) throws -> UInt32? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(valuePointer)
+            return try decodeUnsignedInteger(jsonValue)
         }
 
         func decode(_: UInt64.Type, forKey key: K) throws -> UInt64 {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeUnsignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeUnsignedInteger(jsonValue)
         }
       
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
         func decode(_: UInt128.Type, forKey key: K) throws -> UInt128 {
-            let valuePointer = try getValue(forKey: key)
-            return try decodeUnsignedInteger(valuePointer)
+            let jsonValue = try getValue(forKey: key)
+            return try decodeUnsignedInteger(jsonValue)
         }
 
         func decodeIfPresent(_: UInt64.Type, forKey key: K) throws -> UInt64? {
-            guard let valuePointer = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(valuePointer)
+            return try decodeUnsignedInteger(jsonValue)
         }
 
         func decode<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T {
-            let valuePointer = try getValue(forKey: key)
-#warning("todo")
+            return try impl.unbox(try getValue(forKey: key), as: type)
         }
 
         func decodeIfPresent<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T? {
-            guard let value = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            switch value {
-            case .null: return nil
-            default: return try self.impl.unwrap(value, as: type, for: codingPathNode, key)
-            }
+            if jsonValue.isNull { return nil }
+            return try impl.unbox(jsonValue, as: type)
         }
 
         func nestedContainer<NestedKey: CodingKey>(keyedBy type: NestedKey.Type, forKey key: K) throws -> KeyedDecodingContainer<NestedKey> {
@@ -692,15 +733,15 @@ extension JSONDecoderImpl {
         }
 
         private func decoderForKeyNoThrow(_ key: some CodingKey) -> JSONDecoderImpl {
-            let value: JSONMap.Value
+            let value: JSON
             do {
                 value = try getValue(forKey: key)
             } catch {
+#warning("test")
                 // if there no value for this key then return a null value
-                value = .null
+                value = .init(pointer: nil)
             }
-            let impl = JSONDecoderImpl(userInfo: self.impl.userInfo, from: self.impl.jsonMap, codingPathNode: self.codingPathNode.appending(key), options: self.impl.options)
-            impl.push(value: value)
+            let impl = JSONDecoderImpl(json: value, userInfo: impl.userInfo, codingPathNode: impl.codingPathNode, options: impl.options)
             return impl
         }
 
@@ -720,18 +761,18 @@ extension JSONDecoderImpl {
             dictionary[key.stringValue]
         }
 
-        private func createTypeMismatchError(type: Any.Type, forKey key: K, value: JSONMap.Value) -> DecodingError {
+        private func createTypeMismatchError(type: Any.Type, forKey key: K, value: JSON) -> DecodingError {
             return DecodingError.typeMismatch(type, .init(
-                codingPath: self.codingPathNode.path(byAppending: key), debugDescription: "Expected to decode \(type) but found \(value.debugDataTypeDescription) instead."
+                codingPath: self.codingPathNode.path(byAppending: key), debugDescription: "Expected to decode \(type) but found \(impl.debugDataTypeDescription) instead."
             ))
         }
 
         @inline(__always)
-        private func decodeSignedInteger<T: SignedInteger>(_ valuePointer: UnsafeMutablePointer<yyjson_val>) throws -> T {
-            guard yyjson_is_sint(valuePointer) else {
-                throw createTypeMismatchError(type: Int.self, for: codingPath)
+        private func decodeSignedInteger<T: SignedInteger>(_ jsonValue: JSON) throws -> T {
+            guard jsonValue.isSignedInteger else {
+                throw createTypeMismatchError(type: T.self, forKey: codingPath, value: <#T##JSON#>)
             }
-            let value = yyjson_get_sint(valuePointer)
+            let value = jsonValue.signedIntegerValue
             guard let int = T(exactly: value) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -742,11 +783,11 @@ extension JSONDecoderImpl {
         }
         
         @inline(__always)
-        private func decodeUnsignedInteger<T: UnsignedInteger>(_ valuePointer: UnsafeMutablePointer<yyjson_val>) throws -> T {
-            guard yyjson_is_uint(valuePointer) else {
-                throw createTypeMismatchError(type: Int.self, for: codingPath)
+        private func decodeUnsignedInteger<T: UnsignedInteger>(_ jsonValue: JSON) throws -> T {
+            guard jsonValue.isUnsignedInteger else {
+                throw createTypeMismatchError(type: T.self, for: codingPath)
             }
-            let value = yyjson_get_uint(valuePointer)
+            let value = jsonValue.unsignedIntegerValue
             guard let uint = T(exactly: value) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -777,7 +818,8 @@ extension JSONDecoderImpl {
             self.count = region.count
         }
 
-        let codingPathNode: _CodingPathNode
+        let codingPathNode: CodingPathNode
+        
         public var codingPath: [CodingKey] {
             codingPathNode.path
         }
@@ -1083,42 +1125,5 @@ extension JSONDecoderImpl {
     }
 }
 
-enum YYJSONType: UInt8 {
-    case none = 0
-    case raw = 1
-    case null = 2
-    case bool = 3
-    case number = 4
-    case string = 5
-    case array = 6
-    case object = 7
-}
 
-struct YYJSONSubtype: RawRepresentable, Equatable {
-    let rawValue: UInt8
-    
-    init(rawValue: UInt8) {
-        self.rawValue = rawValue
-    }
-    static let none = YYJSONSubtype(rawValue: 0 << 3)
-    static let `false` = YYJSONSubtype(rawValue: 0 << 3)
-    static let `true` = YYJSONSubtype(rawValue: 1 << 3)
-    static let uint = YYJSONSubtype(rawValue: 0 << 3)
-    static let sint = YYJSONSubtype(rawValue: 1 << 3)
-    static let real = YYJSONSubtype(rawValue: 2 << 3)
-    static let noesc = YYJSONSubtype(rawValue: 1 << 3)
-}
 
-fileprivate var _iso8601Formatter: JJLISO8601DateFormatter = {
-    let formatter = JJLISO8601DateFormatter()
-    formatter.formatOptions = .withInternetDateTime
-    return formatter
-}()
-
-protocol StringDecodableDictionary {
-    static var elementType: Decodable.Type { get }
-}
-
-extension Dictionary : StringDecodableDictionary where Key == String, Value: Decodable {
-    static var elementType: Decodable.Type { return Value.self }
-}

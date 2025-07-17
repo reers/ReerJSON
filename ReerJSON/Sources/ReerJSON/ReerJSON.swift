@@ -151,9 +151,19 @@ open class ReerJSONDecoder {
     /// - throws: `DecodingError.dataCorrupted` if values requested from the payload are corrupted, or if the given data is not valid JSON.
     /// - throws: An error if any value throws an error during decoding.
     open func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
-//        try _decode({
-//            try $0.unwrap($1, as: type, for: .root, _CodingKey?.none)
-//        }, from: data)
+        let doc = data.withUnsafeBytes {
+            yyjson_read($0.bindMemory(to: CChar.self).baseAddress, data.count, 0)
+        }
+        guard let doc else {
+            throw JSONError.readJSONDocumentFailed
+        }
+        
+        defer {
+            yyjson_doc_free(doc)
+        }
+        
+        let impl = JSONDecoderImpl(valuePointer: yyjson_doc_get_root(doc), userInfo: userInfo, options: options)
+        return try impl.unbox(as: type)
     }
     
     func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data, reason: String?) throws -> T {

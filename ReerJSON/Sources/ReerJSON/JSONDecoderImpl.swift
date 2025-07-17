@@ -210,7 +210,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
     
     @inline(__always)
-    private func unbox<T: Decodable>(as type: T.Type) throws -> T {
+    func unbox<T: Decodable>(as type: T.Type) throws -> T {
         if type == Date.self {
             return try unboxDate() as! T
         }
@@ -297,10 +297,6 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
     
     private func unboxDecimal() throws -> Decimal {
-        if let cString = yyjson_get_str(valuePointer), let decimal = Decimal(string: String(cString: cString)) {
-            return decimal
-        }
-        
         guard yyjson_is_num(valuePointer) else {
             throw createTypeMismatchError(type: Decimal.self, for: codingPath)
         }
@@ -332,13 +328,13 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
         }
         
         guard yyjson_is_obj(valuePointer) else {
-            throw DecodingError.typeMismatch([String: Decodable].self, .init(
+            throw DecodingError.typeMismatch([String: Any].self, .init(
                 codingPath: codingPath,
-                debugDescription: "Expected to decode \([String: Decodable].self) but found \(debugDataTypeDescription) instead."
+                debugDescription: "Expected to decode \([String: Any].self) but found \(debugDataTypeDescription) instead."
             ))
         }
         
-        var result = [String: Decodable]()
+        var result = [String: Any]()
         
         let objSize = yyjson_obj_size(valuePointer)
         result.reserveCapacity(Int(objSize))
@@ -385,220 +381,287 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
 }
 
+// MARK: - KeyedDecodingContainerProtocol
+
 extension JSONDecoderImpl {
     struct KeyedContainer<K: CodingKey>: KeyedDecodingContainerProtocol {
         typealias Key = K
 
         let impl: JSONDecoderImpl
-//        let codingPathNode: _CodingPathNode
-//        let dictionary: [String:JSONMap.Value]
+        let dictionary: [String: UnsafeMutablePointer<yyjson_val>]
 
-        static func stringify(objectRegion: JSONMap.Region, using impl: JSONDecoderImpl, codingPathNode: _CodingPathNode, keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy) throws -> [String:JSONMap.Value] {
-            var result = [String:JSONMap.Value]()
-            result.reserveCapacity(objectRegion.count / 2)
-
-            var iter = impl.jsonMap.makeObjectIterator(from: objectRegion.startOffset)
-            switch keyDecodingStrategy {
-            case .useDefaultKeys:
-                while let (keyValue, value) = iter.next() {
-                    // We know these values are keys, but UTF-8 decoding could still fail.
-                    let key = try impl.unwrapString(from: keyValue, for: codingPathNode, _CodingKey?.none)
-                    result[key]._setIfNil(to: value)
-                }
-            case .convertFromSnakeCase:
-                while let (keyValue, value) = iter.next() {
-                    // We know these values are keys, but UTF-8 decoding could still fail.
-                    let key = try impl.unwrapString(from: keyValue, for: codingPathNode, _CodingKey?.none)
-
-                    // Convert the snake case keys in the container to camel case.
-                    // If we hit a duplicate key after conversion, then we'll use the first one we saw.
-                    // Effectively an undefined behavior with JSON dictionaries.
-                    result[JSONDecoder.KeyDecodingStrategy._convertFromSnakeCase(key)]._setIfNil(to: value)
-                }
-            case .custom(let converter):
-                let codingPathForCustomConverter = codingPathNode.path
-                while let (keyValue, value) = iter.next() {
-                    // We know these values are keys, but UTF-8 decoding could still fail.
-                    let key = try impl.unwrapString(from: keyValue, for: codingPathNode, _CodingKey?.none)
-
-                    var pathForKey = codingPathForCustomConverter
-                    pathForKey.append(_CodingKey(stringValue: key)!)
-                    result[converter(pathForKey).stringValue]._setIfNil(to: value)
-                }
+        static func stringify(impl: JSONDecoderImpl) throws -> [String: UnsafeMutablePointer<yyjson_val>] {
+            var iter = yyjson_obj_iter()
+            guard yyjson_obj_iter_init(impl.valuePointer, &iter) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: impl.codingPath,
+                    debugDescription: "Failed to initialize object iterator."
+                ))
             }
-
-            return result
+            var result: [String: UnsafeMutablePointer<yyjson_val>] = [:]
+            while let keyPtr = yyjson_obj_iter_next(&iter) {
+                guard let keyCString = yyjson_get_str(keyPtr) else {
+                    throw DecodingError.dataCorrupted(.init(
+                        codingPath: impl.codingPath,
+                        debugDescription: "Object key is not a valid string."
+                    ))
+                }
+                let key = String(cString: keyCString)
+                
+                guard let valuePtr = yyjson_obj_iter_get_val(keyPtr) else {
+                    throw DecodingError.dataCorrupted(.init(
+                        codingPath: impl.codingPath,
+                        debugDescription: "Failed to get value for key '\(key)'."
+                    ))
+                }
+                result[key] = valuePtr
+            }
         }
 
         init(impl: JSONDecoderImpl) throws {
             self.impl = impl
-//            self.codingPathNode = codingPathNode
-            self.dictionary = try Self.stringify(objectRegion: region, using: impl, codingPathNode: codingPathNode, keyDecodingStrategy: impl.options.keyDecodingStrategy)
+            self.dictionary = try Self.stringify(impl: impl)
         }
 
         public var codingPath : [CodingKey] {
-            codingPathNode.path
+            impl.codingPath
         }
 
         var allKeys: [K] {
-            self.dictionary.keys.compactMap { K(stringValue: $0) }
+            return dictionary.keys.compactMap { K(stringValue: $0) }
         }
 
         func contains(_ key: K) -> Bool {
-            dictionary.keys.contains(key.stringValue)
+            return dictionary.keys.contains(key.stringValue)
         }
 
         func decodeNil(forKey key: K) throws -> Bool {
-            guard case .null = try getValue(forKey: key) else {
-                return false
-            }
-            return true
+            let valuePointer = try getValue(forKey: key)
+            return yyjson_is_null(valuePointer)
         }
 
         func decode(_ type: Bool.Type, forKey key: K) throws -> Bool {
-            let value = try getValue(forKey: key)
+            let valuePointer = try getValue(forKey: key)
 
-            guard case .bool(let bool) = value else {
-                throw createTypeMismatchError(type: type, forKey: key, value: value)
+            guard yyjson_is_bool(valuePointer) else {
+                throw createTypeMismatchError(type: Bool.self, for: codingPath)
             }
-
-            return bool
+            return yyjson_get_bool(valuePointer)
         }
 
         func decodeIfPresent(_ type: Bool.Type, forKey key: K) throws -> Bool? {
-            guard let value = getValueIfPresent(forKey: key) else {
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            switch value {
-            case .null: return nil
-            case .bool(let result): return result
-            default: throw createTypeMismatchError(type: type, forKey: key, value: value)
+            guard yyjson_is_bool(valuePointer) else {
+                throw createTypeMismatchError(type: Bool.self, for: codingPath)
             }
+            return yyjson_get_bool(valuePointer)
         }
 
         func decode(_ type: String.Type, forKey key: K) throws -> String {
-            let value = try getValue(forKey: key)
-            return try impl.unwrapString(from: value, for: self.codingPathNode, key)
+            let valuePointer = try getValue(forKey: key)
+            guard let cCharPointer = yyjson_get_str(valuePointer) else {
+                throw createTypeMismatchError(type: String.self, for: codingPath)
+            }
+            return String(cString: cCharPointer)
         }
 
         func decodeIfPresent(_ type: String.Type, forKey key: K) throws -> String? {
-            guard let value = getValueIfPresent(forKey: key) else {
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            switch value {
-            case .null: return nil
-            default: return try impl.unwrapString(from: value, for: self.codingPathNode, key)
+            guard let cCharPointer = yyjson_get_str(valuePointer) else {
+                throw createTypeMismatchError(type: String.self, for: codingPath)
             }
+            return String(cString: cCharPointer)
         }
 
         func decode(_: Double.Type, forKey key: K) throws -> Double {
-            try decodeFloatingPoint(key: key)
+            let valuePointer = try getValue(forKey: key)
+            guard yyjson_is_num(valuePointer) else {
+                throw createTypeMismatchError(type: Double.self, for: codingPath)
+            }
+            return yyjson_get_num(valuePointer)
         }
 
         func decodeIfPresent(_: Double.Type, forKey key: K) throws -> Double? {
-            try decodeFloatingPointIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            guard yyjson_is_num(valuePointer) else {
+                throw createTypeMismatchError(type: Double.self, for: codingPath)
+            }
+            return yyjson_get_num(valuePointer)
         }
 
         func decode(_: Float.Type, forKey key: K) throws -> Float {
-            try decodeFloatingPoint(key: key)
+            let valuePointer = try getValue(forKey: key)
+            guard yyjson_is_num(valuePointer) else {
+                throw createTypeMismatchError(type: Float.self, for: codingPath)
+            }
+            let doubleValue = yyjson_get_num(valuePointer)
+            guard let floatValue = Float(exactly: doubleValue) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
+                ))
+            }
+            return floatValue
         }
 
         func decodeIfPresent(_: Float.Type, forKey key: K) throws -> Float? {
-            try decodeFloatingPointIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            guard yyjson_is_num(valuePointer) else {
+                throw createTypeMismatchError(type: Float.self, for: codingPath)
+            }
+            let doubleValue = yyjson_get_num(valuePointer)
+            guard let floatValue = Float(exactly: doubleValue) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
+                ))
+            }
+            return floatValue
         }
-
+        
         func decode(_: Int.Type, forKey key: K) throws -> Int {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: Int.Type, forKey key: K) throws -> Int? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decode(_: Int8.Type, forKey key: K) throws -> Int8 {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: Int8.Type, forKey key: K) throws -> Int8? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decode(_: Int16.Type, forKey key: K) throws -> Int16 {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: Int16.Type, forKey key: K) throws -> Int16? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decode(_: Int32.Type, forKey key: K) throws -> Int32 {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: Int32.Type, forKey key: K) throws -> Int32? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decode(_: Int64.Type, forKey key: K) throws -> Int64 {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeSignedInteger(valuePointer)
         }
       
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
         func decode(_: Int128.Type, forKey key: K) throws -> Int128 {
-          try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: Int64.Type, forKey key: K) throws -> Int64? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeSignedInteger(valuePointer)
         }
 
         func decode(_: UInt.Type, forKey key: K) throws -> UInt {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: UInt.Type, forKey key: K) throws -> UInt? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decode(_: UInt8.Type, forKey key: K) throws -> UInt8 {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: UInt8.Type, forKey key: K) throws -> UInt8? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decode(_: UInt16.Type, forKey key: K) throws -> UInt16 {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: UInt16.Type, forKey key: K) throws -> UInt16? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decode(_: UInt32.Type, forKey key: K) throws -> UInt32 {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: UInt32.Type, forKey key: K) throws -> UInt32? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decode(_: UInt64.Type, forKey key: K) throws -> UInt64 {
-            try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeUnsignedInteger(valuePointer)
         }
       
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
         func decode(_: UInt128.Type, forKey key: K) throws -> UInt128 {
-          try decodeFixedWidthInteger(key: key)
+            let valuePointer = try getValue(forKey: key)
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decodeIfPresent(_: UInt64.Type, forKey key: K) throws -> UInt64? {
-            try decodeFixedWidthIntegerIfPresent(key: key)
+            guard let valuePointer = getValueIfPresent(forKey: key) else {
+                return nil
+            }
+            return try decodeUnsignedInteger(valuePointer)
         }
 
         func decode<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T {
-            try self.impl.unwrap(try getValue(forKey: key), as: type, for: codingPathNode, key)
+            let valuePointer = try getValue(forKey: key)
+#warning("todo")
         }
 
         func decodeIfPresent<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T? {
@@ -646,17 +709,19 @@ extension JSONDecoderImpl {
             return impl
         }
 
-        @inline(__always) private func getValue(forKey key: some CodingKey) throws -> JSONMap.Value {
+        @inline(__always)
+        private func getValue(forKey key: some CodingKey) throws -> UnsafeMutablePointer<yyjson_val> {
             guard let value = dictionary[key.stringValue] else {
                 throw DecodingError.keyNotFound(key, .init(
-                    codingPath: self.codingPath,
+                    codingPath: codingPath,
                     debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
                 ))
             }
             return value
         }
 
-        @inline(__always) private func getValueIfPresent(forKey key: some CodingKey) -> JSONMap.Value? {
+        @inline(__always)
+        private func getValueIfPresent(forKey key: some CodingKey) -> UnsafeMutablePointer<yyjson_val>? {
             dictionary[key.stringValue]
         }
 
@@ -666,37 +731,39 @@ extension JSONDecoderImpl {
             ))
         }
 
-        @inline(__always) private func decodeFixedWidthInteger<T: FixedWidthInteger>(key: Self.Key) throws -> T {
-            let value = try getValue(forKey: key)
-            return try self.impl.unwrapFixedWidthInteger(from: value, as: T.self, for: codingPathNode, key)
+        @inline(__always)
+        private func decodeSignedInteger<T: SignedInteger>(_ valuePointer: UnsafeMutablePointer<yyjson_val>) throws -> T {
+            guard yyjson_is_sint(valuePointer) else {
+                throw createTypeMismatchError(type: Int.self, for: codingPath)
+            }
+            let value = yyjson_get_sint(valuePointer)
+            guard let int = T(exactly: value) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Number \(value) is not representable in Swift."
+                ))
+            }
+            return int
         }
-
-        @inline(__always) private func decodeFloatingPoint<T: PrevalidatedJSONNumberBufferConvertible & BinaryFloatingPoint>(key: K) throws -> T {
-            let value = try getValue(forKey: key)
-            return try self.impl.unwrapFloatingPoint(from: value, as: T.self, for: codingPathNode, key)
-        }
-
-        @inline(__always) private func decodeFixedWidthIntegerIfPresent<T: FixedWidthInteger>(key: Self.Key) throws -> T? {
-            guard let value = getValueIfPresent(forKey: key) else {
-                return nil
+        
+        @inline(__always)
+        private func decodeUnsignedInteger<T: UnsignedInteger>(_ valuePointer: UnsafeMutablePointer<yyjson_val>) throws -> T {
+            guard yyjson_is_uint(valuePointer) else {
+                throw createTypeMismatchError(type: Int.self, for: codingPath)
             }
-            switch value {
-            case .null: return nil
-            default: return try self.impl.unwrapFixedWidthInteger(from: value, as: T.self, for: codingPathNode, key)
+            let value = yyjson_get_uint(valuePointer)
+            guard let uint = T(exactly: value) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Number \(value) is not representable in Swift."
+                ))
             }
-        }
-
-        @inline(__always) private func decodeFloatingPointIfPresent<T: PrevalidatedJSONNumberBufferConvertible & BinaryFloatingPoint>(key: K) throws -> T? {
-            guard let value = getValueIfPresent(forKey: key) else {
-                return nil
-            }
-            switch value {
-            case .null: return nil
-            default: return try self.impl.unwrapFloatingPoint(from: value, as: T.self, for: codingPathNode, key)
-            }
+            return uint
         }
     }
 }
+
+// MARK: - UnkeyedDecodingContainer
 
 extension JSONDecoderImpl {
     struct UnkeyedContainer: UnkeyedDecodingContainer {

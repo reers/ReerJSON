@@ -164,8 +164,8 @@ open class ReerJSONDecoder {
         
         var json = JSON(pointer: yyjson_doc_get_root(doc))
         
-        let impl = JSONDecoderImpl(json: json, userInfo: userInfo, options: options)
-        return try impl.unbox(as: type)
+        let impl = JSONDecoderImpl(json: json, userInfo: userInfo, codingPathNode: .root, options: options)
+        return try impl.unbox(json, as: type)
     }
     
     func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data, reason: String?) throws -> T {

@@ -13,12 +13,12 @@ final class ReerJSONTests: XCTestCase {
     }
     
     func testSimpleNumber() throws {
-        let jsonString = "42"
+        let jsonString = "222.0"
         let jsonData = jsonString.data(using: .utf8)!
         let decoder = ReerJSONDecoder()
         
-        let result = try decoder.decode(Int.self, from: jsonData)
-        XCTAssertEqual(result, 42)
+        let result = try decoder.decode(UInt8.self, from: jsonData)
+        XCTAssertEqual(result, 222)
     }
     
     func testSimpleBoolean() throws {
@@ -34,17 +34,17 @@ final class ReerJSONTests: XCTestCase {
         let jsonString = """
         {
             "name": "John",
-            "age": 30,
             "active": true,
-            "score": 95.5
+            "score": 95.5,
+            "age": 33
         }
         """
         
         struct Person: Codable {
             let name: String
-            let age: Int
             let active: Bool
             let score: Double
+            let age: UInt8
         }
         
         let jsonData = jsonString.data(using: .utf8)!
@@ -53,9 +53,9 @@ final class ReerJSONTests: XCTestCase {
         let person = try decoder.decode(Person.self, from: jsonData)
         
         XCTAssertEqual(person.name, "John")
-        XCTAssertEqual(person.age, 30)
         XCTAssertEqual(person.active, true)
         XCTAssertEqual(person.score, 95.5)
+        XCTAssertEqual(person.age, 33)
     }
     
     func testArrayDecoding() throws {

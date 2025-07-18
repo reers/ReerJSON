@@ -323,53 +323,53 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
 
     func decode(_: Int.Type) throws -> Int {
-        try decodeSignedInteger()
+        try decodeInteger()
     }
 
     func decode(_: Int8.Type) throws -> Int8 {
-        try decodeSignedInteger()
+        try decodeInteger()
     }
 
     func decode(_: Int16.Type) throws -> Int16 {
-        try decodeSignedInteger()
+        try decodeInteger()
     }
 
     func decode(_: Int32.Type) throws -> Int32 {
-        try decodeSignedInteger()
+        try decodeInteger()
     }
 
     func decode(_: Int64.Type) throws -> Int64 {
-        try decodeSignedInteger()
+        try decodeInteger()
     }
   
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: Int128.Type) throws -> Int128 {
-        try decodeSignedInteger()
+        try decodeInteger()
     }
 
     func decode(_: UInt.Type) throws -> UInt {
-        try decodeUnsignedInteger()
+        try decodeInteger()
     }
 
     func decode(_: UInt8.Type) throws -> UInt8 {
-        try decodeUnsignedInteger()
+        try decodeInteger()
     }
 
     func decode(_: UInt16.Type) throws -> UInt16 {
-        try decodeUnsignedInteger()
+        try decodeInteger()
     }
 
     func decode(_: UInt32.Type) throws -> UInt32 {
-        try decodeUnsignedInteger()
+        try decodeInteger()
     }
 
     func decode(_: UInt64.Type) throws -> UInt64 {
-        try decodeUnsignedInteger()
+        try decodeInteger()
     }
     
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: UInt128.Type) throws -> UInt128 {
-        try decodeUnsignedInteger()
+        try decodeInteger()
     }
 
     func decode<T: Decodable>(_ type: T.Type) throws -> T {
@@ -377,37 +377,18 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
     
     @inline(__always)
-    private func decodeSignedInteger<T: SignedInteger>() throws -> T {
-        guard topValue.isSignedInteger else {
+    private func decodeInteger<T: FixedWidthInteger>() throws -> T {
+        guard topValue.isNumber else {
             throw createTypeMismatchError(type: T.self, for: codingPath, value: topValue)
         }
-        let value = topValue.signedIntegerValue
-        guard let int = T(exactly: value) else {
+        guard let int: T =  topValue.integer() else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
-                debugDescription: "Number \(value) is not representable in Swift."
+                debugDescription: "Number \(topValue.numberValue) is not representable in Swift."
             ))
         }
         return int
     }
-    
-    @inline(__always)
-    private func decodeUnsignedInteger<T: UnsignedInteger>() throws -> T {
-        guard topValue.isUnsignedInteger else {
-            throw createTypeMismatchError(type: T.self, for: codingPath, value: topValue)
-        }
-        let value = topValue.unsignedIntegerValue
-        guard let uint = T(exactly: value) else {
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: codingPath,
-                debugDescription: "Number \(value) is not representable in Swift."
-            ))
-        }
-        return uint
-    }
-
-    
-    
 }
 
 // MARK: - KeyedDecodingContainerProtocol
@@ -559,134 +540,134 @@ extension JSONDecoderImpl {
         
         func decode(_: Int.Type, forKey key: K) throws -> Int {
             let jsonValue = try getValue(forKey: key)
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decodeIfPresent(_: Int.Type, forKey key: K) throws -> Int? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode(_: Int8.Type, forKey key: K) throws -> Int8 {
             let jsonValue = try getValue(forKey: key)
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decodeIfPresent(_: Int8.Type, forKey key: K) throws -> Int8? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode(_: Int16.Type, forKey key: K) throws -> Int16 {
             let jsonValue = try getValue(forKey: key)
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decodeIfPresent(_: Int16.Type, forKey key: K) throws -> Int16? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode(_: Int32.Type, forKey key: K) throws -> Int32 {
             let jsonValue = try getValue(forKey: key)
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decodeIfPresent(_: Int32.Type, forKey key: K) throws -> Int32? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode(_: Int64.Type, forKey key: K) throws -> Int64 {
             let jsonValue = try getValue(forKey: key)
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
       
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
         func decode(_: Int128.Type, forKey key: K) throws -> Int128 {
             let jsonValue = try getValue(forKey: key)
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decodeIfPresent(_: Int64.Type, forKey key: K) throws -> Int64? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeSignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode(_: UInt.Type, forKey key: K) throws -> UInt {
             let jsonValue = try getValue(forKey: key)
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decodeIfPresent(_: UInt.Type, forKey key: K) throws -> UInt? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode(_: UInt8.Type, forKey key: K) throws -> UInt8 {
             let jsonValue = try getValue(forKey: key)
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decodeIfPresent(_: UInt8.Type, forKey key: K) throws -> UInt8? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode(_: UInt16.Type, forKey key: K) throws -> UInt16 {
             let valuePointer = try getValue(forKey: key)
-            return try decodeUnsignedInteger(valuePointer, forKey: key)
+            return try decodeInteger(valuePointer, forKey: key)
         }
 
         func decodeIfPresent(_: UInt16.Type, forKey key: K) throws -> UInt16? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode(_: UInt32.Type, forKey key: K) throws -> UInt32 {
             let jsonValue = try getValue(forKey: key)
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decodeIfPresent(_: UInt32.Type, forKey key: K) throws -> UInt32? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode(_: UInt64.Type, forKey key: K) throws -> UInt64 {
             let jsonValue = try getValue(forKey: key)
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
       
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
         func decode(_: UInt128.Type, forKey key: K) throws -> UInt128 {
             let jsonValue = try getValue(forKey: key)
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decodeIfPresent(_: UInt64.Type, forKey key: K) throws -> UInt64? {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeUnsignedInteger(jsonValue, forKey: key)
+            return try decodeInteger(jsonValue, forKey: key)
         }
 
         func decode<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T {
@@ -757,35 +738,19 @@ extension JSONDecoderImpl {
                 codingPath: self.codingPathNode.path(byAppending: key), debugDescription: "Expected to decode \(type) but found \(value.debugDataTypeDescription) instead."
             ))
         }
-
+        
         @inline(__always)
-        private func decodeSignedInteger<T: SignedInteger>(_ jsonValue: JSON, forKey key: K) throws -> T {
-            guard jsonValue.isSignedInteger else {
+        private func decodeInteger<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T {
+            guard jsonValue.isNumber else {
                 throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
             }
-            let value = jsonValue.signedIntegerValue
-            guard let int = T(exactly: value) else {
+            guard let int: T =  jsonValue.integer() else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
-                    debugDescription: "Number \(value) is not representable in Swift."
+                    debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
                 ))
             }
             return int
-        }
-        
-        @inline(__always)
-        private func decodeUnsignedInteger<T: UnsignedInteger>(_ jsonValue: JSON, forKey key: K) throws -> T {
-            guard jsonValue.isUnsignedInteger else {
-                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
-            }
-            let value = jsonValue.unsignedIntegerValue
-            guard let uint = T(exactly: value) else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "Number \(value) is not representable in Swift."
-                ))
-            }
-            return uint
         }
     }
 }
@@ -992,7 +957,7 @@ extension JSONDecoderImpl {
 
         mutating func decode(_: Int.Type) throws -> Int {
             let value = try peekNextValue(ofType: Int.self)
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: Int.Type) throws -> Int? {
@@ -1000,12 +965,12 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode(_: Int8.Type) throws -> Int8 {
             let value = try peekNextValue(ofType: Int8.self)
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: Int8.Type) throws -> Int8? {
@@ -1013,12 +978,12 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode(_: Int16.Type) throws -> Int16 {
             let value = try peekNextValue(ofType: Int16.self)
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: Int16.Type) throws -> Int16? {
@@ -1026,12 +991,12 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode(_: Int32.Type) throws -> Int32 {
             let value = try peekNextValue(ofType: Int32.self)
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: Int32.Type) throws -> Int32? {
@@ -1039,18 +1004,18 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode(_: Int64.Type) throws -> Int64 {
             let value = try peekNextValue(ofType: Int64.self)
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
       
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
         mutating func decode(_: Int128.Type) throws -> Int128 {
             let value = try peekNextValue(ofType: Int128.self)
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: Int64.Type) throws -> Int64? {
@@ -1058,12 +1023,12 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeSignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode(_: UInt.Type) throws -> UInt {
             let value = try peekNextValue(ofType: UInt.self)
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: UInt.Type) throws -> UInt? {
@@ -1071,12 +1036,12 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode(_: UInt8.Type) throws -> UInt8 {
             let value = try peekNextValue(ofType: UInt.self)
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: UInt8.Type) throws -> UInt8? {
@@ -1084,12 +1049,12 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode(_: UInt16.Type) throws -> UInt16 {
             let value = try peekNextValue(ofType: UInt.self)
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: UInt16.Type) throws -> UInt16? {
@@ -1097,12 +1062,12 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode(_: UInt32.Type) throws -> UInt32 {
             let value = try peekNextValue(ofType: UInt.self)
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: UInt32.Type) throws -> UInt32? {
@@ -1110,18 +1075,18 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode(_: UInt64.Type) throws -> UInt64 {
             let value = try peekNextValue(ofType: UInt.self)
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
       
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
         mutating func decode(_: UInt128.Type) throws -> UInt128 {
             let value = try peekNextValue(ofType: UInt.self)
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decodeIfPresent(_: UInt64.Type) throws -> UInt64? {
@@ -1129,7 +1094,7 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            return try decodeUnsignedInteger(value)
+            return try decodeInteger(value)
         }
 
         mutating func decode<T: Decodable>(_ type: T.Type) throws -> T {
@@ -1186,31 +1151,14 @@ extension JSONDecoderImpl {
         }
         
         @inline(__always)
-        private mutating func decodeSignedInteger<T: SignedInteger>(_ jsonValue: JSON) throws -> T {
-            guard jsonValue.isSignedInteger else {
+        private mutating func decodeInteger<T: FixedWidthInteger>(_ jsonValue: JSON) throws -> T {
+            guard jsonValue.isNumber else {
                 throw impl.createTypeMismatchError(type: T.self, for: currentCodingPath, value: jsonValue)
             }
-            let value = jsonValue.signedIntegerValue
-            guard let int = T(exactly: value) else {
+            guard let int: T =  jsonValue.integer() else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
-                    debugDescription: "Number \(value) is not representable in Swift."
-                ))
-            }
-            advanceToNextValue()
-            return int
-        }
-        
-        @inline(__always)
-        private mutating func decodeUnsignedInteger<T: UnsignedInteger>(_ jsonValue: JSON) throws -> T {
-            guard jsonValue.isUnsignedInteger else {
-                throw impl.createTypeMismatchError(type: T.self, for: currentCodingPath, value: jsonValue)
-            }
-            let value = jsonValue.unsignedIntegerValue
-            guard let int = T(exactly: value) else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "Number \(value) is not representable in Swift."
+                    debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
                 ))
             }
             advanceToNextValue()

@@ -108,6 +108,20 @@ extension JSON {
     var isObject: Bool {
         return yyjson_is_obj(pointer)
     }
+    
+    @inline(__always)
+    func integer<T: FixedWidthInteger>() -> T? {
+        if isSignedInteger {
+            return T(exactly: signedIntegerValue)
+        }
+        if isUnsignedInteger {
+            return T(exactly: unsignedIntegerValue)
+        }
+        if let double = double {
+            return T(exactly: double)
+        }
+        return nil
+    }
 }
 
 extension JSON {

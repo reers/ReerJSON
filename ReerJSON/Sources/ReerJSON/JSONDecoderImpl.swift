@@ -474,6 +474,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
+            if jsonValue.isNull { return nil }
             guard let bool = jsonValue.bool else {
                 throw createTypeMismatchError(type: Bool.self, forKey: key, value: jsonValue)
             }
@@ -492,6 +493,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
+            if jsonValue.isNull { return nil }
             guard let string = jsonValue.string else {
                 throw createTypeMismatchError(type: String.self, forKey: key, value: jsonValue)
             }
@@ -510,6 +512,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
+            if jsonValue.isNull { return nil }
             guard let double = jsonValue.double else {
                 throw createTypeMismatchError(type: Double.self, forKey: key, value: jsonValue)
             }
@@ -535,6 +538,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
+            if jsonValue.isNull { return nil }
             guard jsonValue.isNumber else {
                 throw createTypeMismatchError(type: Float.self, forKey: key, value: jsonValue)
             }
@@ -557,7 +561,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode(_: Int8.Type, forKey key: K) throws -> Int8 {
@@ -569,7 +573,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode(_: Int16.Type, forKey key: K) throws -> Int16 {
@@ -581,7 +585,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode(_: Int32.Type, forKey key: K) throws -> Int32 {
@@ -593,7 +597,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode(_: Int64.Type, forKey key: K) throws -> Int64 {
@@ -611,7 +615,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode(_: UInt.Type, forKey key: K) throws -> UInt {
@@ -623,7 +627,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode(_: UInt8.Type, forKey key: K) throws -> UInt8 {
@@ -635,7 +639,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode(_: UInt16.Type, forKey key: K) throws -> UInt16 {
@@ -647,7 +651,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode(_: UInt32.Type, forKey key: K) throws -> UInt32 {
@@ -659,7 +663,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode(_: UInt64.Type, forKey key: K) throws -> UInt64 {
@@ -677,7 +681,7 @@ extension JSONDecoderImpl {
             guard let jsonValue = getValueIfPresent(forKey: key) else {
                 return nil
             }
-            return try decodeInteger(jsonValue, forKey: key)
+            return try decodeIntegerIfPresent(jsonValue, forKey: key)
         }
 
         func decode<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T {
@@ -762,6 +766,21 @@ extension JSONDecoderImpl {
             }
             return int
         }
+        
+        @inline(__always)
+        private func decodeIntegerIfPresent<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T? {
+            if jsonValue.isNull { return nil }
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
+            }
+            guard let int: T =  jsonValue.integer() else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
+                ))
+            }
+            return int
+        }
     }
 }
 
@@ -824,6 +843,7 @@ extension JSONDecoderImpl {
             }
             
             let nextValue = JSON(pointer: elementPtr)
+            if nextValue.isNull { return nil }
             peekedValue = nextValue // 记住这个偷看的值
             return nextValue
         }

@@ -151,6 +151,34 @@ final class ReerJSONTests: XCTestCase {
             let name: String
             let age: Int?
             let email: String?
+            
+            // 编译器自动生成的 CodingKeys 枚举
+            private enum CodingKeys: String, CodingKey {
+                case name = "name"
+                case age = "age"
+                case email = "email"
+            }
+            
+            // 编译器自动生成的 init(from decoder:) 方法
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                
+                // 必需属性使用 decode(_:forKey:)
+                self.name = try container.decode(String.self, forKey: .name)
+                
+                // 可选属性使用 decodeIfPresent(_:forKey:)
+                self.age = try container.decodeIfPresent(Int.self, forKey: .age)
+                self.email = try container.decodeIfPresent(String.self, forKey: .email)
+            }
+            
+            // 编译器自动生成的 encode(to encoder:) 方法
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                
+                try container.encode(self.name, forKey: .name)
+                try container.encodeIfPresent(self.age, forKey: .age)
+                try container.encodeIfPresent(self.email, forKey: .email)
+            }
         }
         
         let jsonData = jsonString.data(using: .utf8)!
@@ -190,4 +218,6 @@ final class ReerJSONTests: XCTestCase {
         XCTAssertEqual(reerResult.value, foundationResult.value)
         XCTAssertEqual(reerResult.items, foundationResult.items)
     }
+    
+    
 }

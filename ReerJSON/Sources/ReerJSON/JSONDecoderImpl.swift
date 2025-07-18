@@ -109,12 +109,12 @@ final class JSONDecoderImpl: Decoder {
     }
     
     @inline(__always)
-    func unbox<T: Decodable>(_ value: JSON, as type: T.Type) throws -> T {
+    func unbox<T: Decodable>(_ value: JSON, as type: T.Type, _ additionalKey: (some CodingKey)? = nil) throws -> T {
         if type == Date.self {
-            return try unboxDate() as! T
+            return try unboxDate(from: value, additionalKey) as! T
         }
         if type == Data.self {
-            return try unboxData() as! T
+            return try unboxData(from: value, additionalKey) as! T
         }
         if type == URL.self {
             return try unboxURL() as! T
@@ -125,14 +125,18 @@ final class JSONDecoderImpl: Decoder {
         if T.self is StringDecodableDictionary.Type {
             return try unboxDictionary()
         }
-
-        return try type.init(from: self)
+        
+        return try with(value: value, path: codingPathNode.appending(additionalKey)) {
+            try type.init(from: self)
+        }
     }
     
-    private func unboxDate() throws -> Date {
+    private func unboxDate<K: CodingKey>(from value: JSON, _ additionalKey: K? = nil) throws -> Date {
         switch options.dateDecodingStrategy {
         case .deferredToDate:
-            return try Date(from: self)
+            return try with(value: value, path: codingPathNode.appending(additionalKey)) {
+                try Date(from: self)
+            }
         case .secondsSince1970:
             let double = try decode(Double.self)
             return Date(timeIntervalSince1970: double)
@@ -158,16 +162,20 @@ final class JSONDecoderImpl: Decoder {
             }
             return date
         case .custom(let closure):
-            return try closure(self)
+            return try with(value: value, path: codingPathNode.appending(additionalKey)) {
+                try closure(self)
+            }
         @unknown default:
             fatalError()
         }
     }
     
-    private func unboxData() throws -> Data {
+    private func unboxData<K: CodingKey>(from value: JSON, _ additionalKey: K? = nil) throws -> Data {
         switch options.dataDecodingStrategy {
         case .deferredToData:
-            return try Data(from: self)
+            return try with(value: value, path: codingPathNode.appending(additionalKey)) {
+                try Data(from: self)
+            }
         case .base64:
             let string = try decode(String.self)
             guard let data = Data(base64Encoded: string) else {
@@ -178,7 +186,9 @@ final class JSONDecoderImpl: Decoder {
             }
             return data
         case .custom(let closure):
-            return try closure(self)
+            return try with(value: value, path: codingPathNode.appending(additionalKey)) {
+                try closure(self)
+            }
         @unknown default:
             fatalError()
         }
@@ -373,7 +383,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
 
     func decode<T: Decodable>(_ type: T.Type) throws -> T {
-        return try unbox(topValue, as: type)
+        return try unbox(topValue, as: type, _CodingKey?.none)
     }
     
     @inline(__always)
@@ -671,7 +681,7 @@ extension JSONDecoderImpl {
         }
 
         func decode<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T {
-            return try impl.unbox(try getValue(forKey: key), as: type)
+            return try impl.unbox(try getValue(forKey: key), as: type, key)
         }
 
         func decodeIfPresent<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T? {
@@ -679,7 +689,7 @@ extension JSONDecoderImpl {
                 return nil
             }
             if jsonValue.isNull { return nil }
-            return try impl.unbox(jsonValue, as: type)
+            return try impl.unbox(jsonValue, as: type, key)
         }
 
         func nestedContainer<NestedKey: CodingKey>(keyedBy type: NestedKey.Type, forKey key: K) throws -> KeyedDecodingContainer<NestedKey> {
@@ -1100,7 +1110,7 @@ extension JSONDecoderImpl {
         mutating func decode<T: Decodable>(_ type: T.Type) throws -> T {
             let value = try self.peekNextValue(ofType: type)
             let result = try impl.with(value: value, path: codingPathNode.appending(index: currentIndex)) {
-                try impl.unbox(value, as: type)
+                try impl.unbox(value, as: type, currentIndexKey)
             }
             advanceToNextValue()
             return result
@@ -1115,7 +1125,7 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return nil
             }
-            let result = try impl.unbox(value, as: type)
+            let result = try impl.unbox(value, as: type, currentIndexKey)
             advanceToNextValue()
             return result
         }

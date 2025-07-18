@@ -71,6 +71,33 @@ final class ReerJSONTests: XCTestCase {
             let names: [String]
         }
         
+        /**
+         // 编译器自动生成的 CodingKeys 枚举
+             private enum CodingKeys: String, CodingKey {
+                 case numbers = "numbers"
+                 case names = "names"
+             }
+             
+             // 编译器自动生成的 init(from decoder:) 方法
+             init(from decoder: Decoder) throws {
+                 let container = try decoder.container(keyedBy: CodingKeys.self)
+                 
+                 // 解码 numbers 属性
+                 self.numbers = try container.decode([Int].self, forKey: .numbers)
+                 
+                 // 解码 names 属性
+                 self.names = try container.decode([String].self, forKey: .names)
+             }
+             
+             // 编译器自动生成的 encode(to encoder:) 方法
+             func encode(to encoder: Encoder) throws {
+                 var container = encoder.container(keyedBy: CodingKeys.self)
+                 
+                 try container.encode(self.numbers, forKey: .numbers)
+                 try container.encode(self.names, forKey: .names)
+             }
+         */
+        
         let jsonData = jsonString.data(using: .utf8)!
         let decoder = ReerJSONDecoder()
         

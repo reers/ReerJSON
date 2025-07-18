@@ -109,3 +109,17 @@ extension JSON {
         return yyjson_is_obj(pointer)
     }
 }
+
+extension JSON {
+    var debugDataTypeDescription : String {
+        switch type {
+        case .string: return "a string"
+        case .number: return "number"
+        case .bool: return "bool"
+        case .null: return "null"
+        case .object: return "a dictionary"
+        case .array: return "an array"
+        default: return "an unknown"
+        }
+    }
+}

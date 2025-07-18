@@ -20,11 +20,11 @@ final class JSONDecoderImpl: Decoder {
     
     init(json: JSON, userInfo: [CodingUserInfoKey: Any], codingPathNode: CodingPathNode, options: ReerJSONDecoder.Options) {
         self.root = json
-        push(value: json)
         self.codingPathNode = codingPathNode
 //        self.containers = containers
         self.userInfo = userInfo
         self.options = options
+        push(value: json)
     }
     
     var values: ContiguousArray<JSON> = []
@@ -53,7 +53,7 @@ final class JSONDecoderImpl: Decoder {
         default:
             throw DecodingError.typeMismatch([String: Any].self, DecodingError.Context(
                 codingPath: codingPath,
-                debugDescription: "Expected to decode \([String: Any].self) but found \(debugDataTypeDescription) instead."
+                debugDescription: "Expected to decode \([String: Any].self) but found \(topValue.debugDataTypeDescription) instead."
             ))
         }
     }
@@ -61,7 +61,7 @@ final class JSONDecoderImpl: Decoder {
     func unkeyedContainer() throws -> UnkeyedDecodingContainer {
         switch topValue.type {
         case .array:
-            return UnkeyedContainer(impl: self)
+            return UnkeyedContainer(impl: self, codingPathNode: codingPathNode)
         case .null:
             throw DecodingError.valueNotFound([Any].self, DecodingError.Context(
                 codingPath: codingPath,
@@ -70,7 +70,7 @@ final class JSONDecoderImpl: Decoder {
         default:
             throw DecodingError.typeMismatch([Any].self, DecodingError.Context(
                 codingPath: codingPath,
-                debugDescription: "Expected to decode \([Any].self) but found \(debugDataTypeDescription) instead."
+                debugDescription: "Expected to decode \([Any].self) but found \(topValue.debugDataTypeDescription) instead."
             ))
         }
     }
@@ -79,25 +79,15 @@ final class JSONDecoderImpl: Decoder {
         return self
     }
     
-    private func createTypeMismatchError(type: Any.Type, for path: [CodingKey]) -> DecodingError {
+    private func createTypeMismatchError(type: Any.Type, for path: [CodingKey], value: JSON) -> DecodingError {
         return DecodingError.typeMismatch(type, .init(
             codingPath: path,
-            debugDescription: "Expected to decode \(type) but found \(debugDataTypeDescription) instead."
+            debugDescription: "Expected to decode \(type) but found \(value.debugDataTypeDescription) instead."
         ))
     }
 
     
-    private var debugDataTypeDescription : String {
-        switch topValue.type {
-        case .string: return "a string"
-        case .number: return "number"
-        case .bool: return "bool"
-        case .null: return "null"
-        case .object: return "a dictionary"
-        case .array: return "an array"
-        default: return "an unknown"
-        }
-    }
+    
     
     // Instead of creating a new JSONDecoderImpl for passing to methods that take Decoder arguments, wrap the access in this method, which temporarily mutates this JSONDecoderImpl instance with the nested value and its coding path.
     @inline(__always)
@@ -207,7 +197,7 @@ final class JSONDecoderImpl: Decoder {
     
     private func unboxDecimal() throws -> Decimal {
         guard topValue.isNull else {
-            throw createTypeMismatchError(type: Decimal.self, for: codingPath)
+            throw createTypeMismatchError(type: Decimal.self, for: codingPath, value: topValue)
         }
         
         switch topValue.subtype {
@@ -225,7 +215,7 @@ final class JSONDecoderImpl: Decoder {
             }
             return Decimal(doubleValue)
         default:
-            throw createTypeMismatchError(type: Decimal.self, for: codingPath)
+            throw createTypeMismatchError(type: Decimal.self, for: codingPath, value: topValue)
         }
     }
     
@@ -237,7 +227,7 @@ final class JSONDecoderImpl: Decoder {
         guard topValue.isObject else {
             throw DecodingError.typeMismatch([String: Any].self, .init(
                 codingPath: codingPath,
-                debugDescription: "Expected to decode \([String: Any].self) but found \(debugDataTypeDescription) instead."
+                debugDescription: "Expected to decode \([String: Any].self) but found \(topValue.debugDataTypeDescription) instead."
             ))
         }
         
@@ -299,28 +289,28 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
 
     func decode(_: Bool.Type) throws -> Bool {
         guard let bool = topValue.bool else {
-            throw createTypeMismatchError(type: Bool.self, for: codingPath)
+            throw createTypeMismatchError(type: Bool.self, for: codingPath, value: topValue)
         }
         return bool
     }
 
     func decode(_: String.Type) throws -> String {
         guard let string = topValue.string else {
-            throw createTypeMismatchError(type: String.self, for: codingPath)
+            throw createTypeMismatchError(type: String.self, for: codingPath, value: topValue)
         }
         return string
     }
 
     func decode(_: Double.Type) throws -> Double {
         guard let double = topValue.double else {
-            throw createTypeMismatchError(type: Double.self, for: codingPath)
+            throw createTypeMismatchError(type: Double.self, for: codingPath, value: topValue)
         }
         return double
     }
 
     func decode(_: Float.Type) throws -> Float {
         guard topValue.isNumber else {
-            throw createTypeMismatchError(type: Float.self, for: codingPath)
+            throw createTypeMismatchError(type: Float.self, for: codingPath, value: topValue)
         }
         let doubleValue = topValue.numberValue
         guard let floatValue = Float(exactly: doubleValue) else {
@@ -389,7 +379,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     @inline(__always)
     private func decodeSignedInteger<T: SignedInteger>() throws -> T {
         guard topValue.isSignedInteger else {
-            throw createTypeMismatchError(type: T.self, for: codingPath)
+            throw createTypeMismatchError(type: T.self, for: codingPath, value: topValue)
         }
         let value = topValue.signedIntegerValue
         guard let int = T(exactly: value) else {
@@ -404,7 +394,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     @inline(__always)
     private func decodeUnsignedInteger<T: UnsignedInteger>() throws -> T {
         guard topValue.isUnsignedInteger else {
-            throw createTypeMismatchError(type: T.self, for: codingPath)
+            throw createTypeMismatchError(type: T.self, for: codingPath, value: topValue)
         }
         let value = topValue.unsignedIntegerValue
         guard let uint = T(exactly: value) else {
@@ -764,7 +754,7 @@ extension JSONDecoderImpl {
 
         private func createTypeMismatchError(type: Any.Type, forKey key: K, value: JSON) -> DecodingError {
             return DecodingError.typeMismatch(type, .init(
-                codingPath: self.codingPathNode.path(byAppending: key), debugDescription: "Expected to decode \(type) but found \(impl.debugDataTypeDescription) instead."
+                codingPath: self.codingPathNode.path(byAppending: key), debugDescription: "Expected to decode \(type) but found \(value.debugDataTypeDescription) instead."
             ))
         }
 
@@ -805,19 +795,20 @@ extension JSONDecoderImpl {
 extension JSONDecoderImpl {
     struct UnkeyedContainer: UnkeyedDecodingContainer {
         let impl: JSONDecoderImpl
-//        var valueIterator: JSONMap.ArrayIterator
-//        var peekedValue: JSONMap.Value?
+        var arrayPointer: UnsafeMutablePointer<yyjson_val>? // 指向数组的指针
+        var peekedValue: JSON? // 预先偷看的下一个值
         let count: Int?
 
-        var isAtEnd: Bool { self.currentIndex >= (self.count!) }
+        var isAtEnd: Bool { self.currentIndex >= (self.count ?? 0) }
         var currentIndex = 0
 
         init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) {
             self.impl = impl
             self.codingPathNode = codingPathNode
-//            self.valueIterator = impl.jsonMap.makeArrayIterator(from: region.startOffset)
-//            self.count = region.count
-            #warning("count....")
+            self.arrayPointer = impl.topValue.pointer
+            
+            // 获取数组长度
+            self.count = Int(yyjson_arr_size(arrayPointer))
         }
 
         let codingPathNode: CodingPathNode
@@ -838,238 +829,36 @@ extension JSONDecoderImpl {
 
         private mutating func advanceToNextValue() {
             currentIndex += 1
-//            peekedValue = nil
+            peekedValue = nil // 清空预览值，下次需要重新偷看
         }
 
-        mutating func decodeNil() throws -> Bool {
-            let value = try self.peekNextValue(ofType: Never.self)
-            switch value {
-            case .null:
-                advanceToNextValue()
-                return true
-            default:
-                // The protocol states:
-                //   If the value is not null, does not increment currentIndex.
-                return false
-            }
-        }
-
-        mutating func decode(_ type: Bool.Type) throws -> Bool {
-            let value = try self.peekNextValue(ofType: Bool.self)
-            guard case .bool(let bool) = value else {
-                throw impl.createTypeMismatchError(type: type, for: self.currentCodingPath, value: value)
-            }
-
-            advanceToNextValue()
-            return bool
-        }
-
-        mutating func decodeIfPresent(_ type: Bool.Type) throws -> Bool? {
-            let value = self.peekNextValueIfPresent(ofType: Bool.self)
-            let result: Bool? = switch value {
-            case nil, .null: nil
-            case .bool(let bool): bool
-            default: throw impl.createTypeMismatchError(type: type, for: self.currentCodingPath, value: value!)
-            }
-            advanceToNextValue()
-            return result
-        }
-
-        mutating func decode(_ type: String.Type) throws -> String {
-            let value = try self.peekNextValue(ofType: String.self)
-            let string = try impl.unwrapString(from: value, for: codingPathNode, currentIndexKey)
-            advanceToNextValue()
-            return string
-        }
-
-        mutating func decodeIfPresent(_ type: String.Type) throws -> String? {
-            let value = self.peekNextValueIfPresent(ofType: String.self)
-            let result: String? = switch value {
-            case nil, .null: nil
-            default: try impl.unwrapString(from: value.unsafelyUnwrapped, for: codingPathNode, currentIndexKey)
-            }
-            advanceToNextValue()
-            return result
-        }
-
-        mutating func decode(_: Double.Type) throws -> Double {
-            try decodeFloatingPoint()
-        }
-
-        mutating func decodeIfPresent(_ type: Double.Type) throws -> Double? {
-            try decodeFloatingPointIfPresent()
-        }
-
-        mutating func decode(_: Float.Type) throws -> Float {
-            try decodeFloatingPoint()
-        }
-
-        mutating func decodeIfPresent(_ type: Float.Type) throws -> Float? {
-            try decodeFloatingPointIfPresent()
-        }
-
-        mutating func decode(_: Int.Type) throws -> Int {
-            try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: Int.Type) throws -> Int? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode(_: Int8.Type) throws -> Int8 {
-            try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: Int8.Type) throws -> Int8? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode(_: Int16.Type) throws -> Int16 {
-            try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: Int16.Type) throws -> Int16? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode(_: Int32.Type) throws -> Int32 {
-            try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: Int32.Type) throws -> Int32? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode(_: Int64.Type) throws -> Int64 {
-            try decodeFixedWidthInteger()
-        }
-      
-        @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-        mutating func decode(_: Int128.Type) throws -> Int128 {
-          try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: Int64.Type) throws -> Int64? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode(_: UInt.Type) throws -> UInt {
-            try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: UInt.Type) throws -> UInt? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode(_: UInt8.Type) throws -> UInt8 {
-            try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: UInt8.Type) throws -> UInt8? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode(_: UInt16.Type) throws -> UInt16 {
-            try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: UInt16.Type) throws -> UInt16? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode(_: UInt32.Type) throws -> UInt32 {
-            try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: UInt32.Type) throws -> UInt32? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode(_: UInt64.Type) throws -> UInt64 {
-            try decodeFixedWidthInteger()
-        }
-      
-        @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-        mutating func decode(_: UInt128.Type) throws -> UInt128 {
-          try decodeFixedWidthInteger()
-        }
-
-        mutating func decodeIfPresent(_: UInt64.Type) throws -> UInt64? {
-            try decodeFixedWidthIntegerIfPresent()
-        }
-
-        mutating func decode<T: Decodable>(_ type: T.Type) throws -> T {
-            let value = try self.peekNextValue(ofType: type)
-            let result = try impl.unwrap(value, as: type, for: codingPathNode, currentIndexKey)
-
-            advanceToNextValue()
-            return result
-        }
-
-        mutating func decodeIfPresent<T: Decodable>(_ type: T.Type) throws -> T? {
-            let value = self.peekNextValueIfPresent(ofType: type)
-            let result: T? = switch value {
-            case nil, .null: nil
-            default: try impl.unwrap(value.unsafelyUnwrapped, as: type, for: codingPathNode, currentIndexKey)
-            }
-            advanceToNextValue()
-            return result
-        }
-
-        mutating func nestedContainer<NestedKey: CodingKey>(keyedBy type: NestedKey.Type) throws -> KeyedDecodingContainer<NestedKey> {
-            let value = try self.peekNextValue(ofType: KeyedDecodingContainer<NestedKey>.self)
-            let container = try impl.with(value: value, path: codingPathNode.appending(index: currentIndex)) {
-                try impl.container(keyedBy: type)
-            }
-
-            advanceToNextValue()
-            return container
-        }
-
-        mutating func nestedUnkeyedContainer() throws -> UnkeyedDecodingContainer {
-            let value = try self.peekNextValue(ofType: UnkeyedDecodingContainer.self)
-            let container = try impl.with(value: value, path: codingPathNode.appending(index: currentIndex)) {
-                try impl.unkeyedContainer()
-            }
-
-            advanceToNextValue()
-            return container
-        }
-
-        mutating func superDecoder() throws -> Decoder {
-            let decoder = try decoderForNextElement(ofType: Decoder.self)
-            advanceToNextValue()
-            return decoder
-        }
-
-        private mutating func decoderForNextElement<T>(ofType type: T.Type) throws -> JSONDecoderImpl {
-            let value = try self.peekNextValue(ofType: type)
-            let impl = JSONDecoderImpl(
-                userInfo: self.impl.userInfo,
-                from: self.impl.jsonMap,
-                codingPathNode: self.codingPathNode.appending(index: self.currentIndex),
-                options: self.impl.options
-            )
-            impl.push(value: value)
-            return impl
-        }
-
+        // 偷看下一个值，但不移动索引 - 可能没有值
         @inline(__always)
-        private mutating func peekNextValueIfPresent<T>(ofType type: T.Type) -> JSONMap.Value? {
+        private mutating func peekNextValueIfPresent<T>(ofType type: T.Type) -> JSON? {
             if let value = peekedValue {
-                return value
+                return value // 如果之前已经偷看过了，直接返回
             }
-            guard let nextValue = valueIterator.next() else {
+            
+            guard currentIndex < (count ?? 0) else {
+                return nil // 没有下一个值了
+            }
+            
+            // 从数组中获取当前索引的元素
+            guard let elementPtr = yyjson_arr_get(arrayPointer, currentIndex) else {
                 return nil
             }
-            peekedValue = nextValue
+            
+            let nextValue = JSON(pointer: elementPtr)
+            peekedValue = nextValue // 记住这个偷看的值
             return nextValue
         }
 
+        // 偷看下一个值，如果没有就抛出错误
         @inline(__always)
-        private mutating func peekNextValue<T>(ofType type: T.Type) throws -> JSONMap.Value {
+        private mutating func peekNextValue<T>(ofType type: T.Type) throws -> JSON {
             guard let nextValue = peekNextValueIfPresent(ofType: type) else {
-                var message = "Unkeyed container is at end."
+                // 根据不同类型生成不同的错误信息
+                var message = "Unkeyed container is at end." // 数组已经读完了
                 if T.self == UnkeyedContainer.self {
                     message = "Cannot get nested unkeyed container -- unkeyed container is at end."
                 }
@@ -1089,43 +878,343 @@ extension JSONDecoderImpl {
             return nextValue
         }
 
-        @inline(__always) private mutating func decodeFixedWidthInteger<T: FixedWidthInteger>() throws -> T {
-            let value = try self.peekNextValue(ofType: T.self)
-            let key = _CodingKey(index: self.currentIndex)
-            let result = try self.impl.unwrapFixedWidthInteger(from: value, as: T.self, for: codingPathNode, key)
-            advanceToNextValue()
-            return result
+        mutating func decodeNil() throws -> Bool {
+            let value = try self.peekNextValue(ofType: Never.self)
+            if value.isNull {
+                advanceToNextValue()
+                return true
+            } else {
+                // 协议规定：如果不是null，不要移动索引
+                return false
+            }
         }
 
-        @inline(__always) private mutating func decodeFloatingPoint<T: PrevalidatedJSONNumberBufferConvertible & BinaryFloatingPoint>() throws -> T {
-            let value = try self.peekNextValue(ofType: T.self)
-            let key = _CodingKey(index: self.currentIndex)
-            let result = try self.impl.unwrapFloatingPoint(from: value, as: T.self, for: codingPathNode, key)
+        mutating func decode(_ type: Bool.Type) throws -> Bool {
+            let value = try self.peekNextValue(ofType: Bool.self)
+            guard let bool = value.bool else {
+                throw impl.createTypeMismatchError(type: type, for: codingPath, value: value)
+            }
             advanceToNextValue()
-            return result
+            return bool
         }
 
-        @inline(__always) private mutating func decodeFixedWidthIntegerIfPresent<T: FixedWidthInteger>() throws -> T? {
-            let value = self.peekNextValueIfPresent(ofType: T.self)
-            let result: T? = switch value {
-            case nil, .null: nil
-            default: try impl.unwrapFixedWidthInteger(from: value.unsafelyUnwrapped, as: T.self, for: codingPathNode, currentIndexKey)
+        mutating func decodeIfPresent(_ type: Bool.Type) throws -> Bool? {
+            guard let value = peekNextValueIfPresent(ofType: Bool.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            guard let bool = value.bool else {
+                throw impl.createTypeMismatchError(type: type, for: currentCodingPath, value: value)
+            }
+            
+            advanceToNextValue()
+            return bool
+        }
+
+        mutating func decode(_ type: String.Type) throws -> String {
+            let value = try self.peekNextValue(ofType: String.self)
+            guard let string = value.string else {
+                throw impl.createTypeMismatchError(type: type, for: currentCodingPath, value: value)
+            }
+            advanceToNextValue()
+            return string
+        }
+
+        mutating func decodeIfPresent(_ type: String.Type) throws -> String? {
+            guard let value = peekNextValueIfPresent(ofType: String.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            guard let string = value.string else {
+                throw impl.createTypeMismatchError(type: type, for: currentCodingPath, value: value)
+            }
+            
+            advanceToNextValue()
+            return string
+        }
+
+        mutating func decode(_: Double.Type) throws -> Double {
+            let value = try peekNextValue(ofType: Double.self)
+            guard let double = value.double else {
+                throw impl.createTypeMismatchError(type: Double.self, for: currentCodingPath, value: value)
+            }
+            advanceToNextValue()
+            return double
+        }
+
+        mutating func decodeIfPresent(_ type: Double.Type) throws -> Double? {
+            guard let value = peekNextValueIfPresent(ofType: Double.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            guard let double = value.double else {
+                throw impl.createTypeMismatchError(type: type, for: currentCodingPath, value: value)
+            }
+            advanceToNextValue()
+            return double
+        }
+
+        mutating func decode(_: Float.Type) throws -> Float {
+            let value = try peekNextValue(ofType: Float.self)
+            guard value.isNumber else {
+                throw impl.createTypeMismatchError(type: Float.self, for: currentCodingPath, value: value)
+            }
+            let doubleValue = value.numberValue
+            guard let floatValue = Float(exactly: doubleValue) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
+                ))
+            }
+            advanceToNextValue()
+            return floatValue
+        }
+
+        mutating func decodeIfPresent(_ type: Float.Type) throws -> Float? {
+            guard let value = peekNextValueIfPresent(ofType: Float.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            guard value.isNumber else {
+                throw impl.createTypeMismatchError(type: Float.self, for: currentCodingPath, value: value)
+            }
+            let doubleValue = value.numberValue
+            guard let floatValue = Float(exactly: doubleValue) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
+                ))
+            }
+            advanceToNextValue()
+            return floatValue
+        }
+      
+
+        mutating func decode(_: Int.Type) throws -> Int {
+            let value = try peekNextValue(ofType: Int.self)
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: Int.Type) throws -> Int? {
+            guard let value = peekNextValueIfPresent(ofType: Int.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decode(_: Int8.Type) throws -> Int8 {
+            let value = try peekNextValue(ofType: Int8.self)
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: Int8.Type) throws -> Int8? {
+            guard let value = peekNextValueIfPresent(ofType: Int8.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decode(_: Int16.Type) throws -> Int16 {
+            let value = try peekNextValue(ofType: Int16.self)
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: Int16.Type) throws -> Int16? {
+            guard let value = peekNextValueIfPresent(ofType: Int16.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decode(_: Int32.Type) throws -> Int32 {
+            let value = try peekNextValue(ofType: Int32.self)
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: Int32.Type) throws -> Int32? {
+            guard let value = peekNextValueIfPresent(ofType: Int32.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decode(_: Int64.Type) throws -> Int64 {
+            let value = try peekNextValue(ofType: Int64.self)
+            return try decodeSignedInteger(value)
+        }
+      
+        @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+        mutating func decode(_: Int128.Type) throws -> Int128 {
+            let value = try peekNextValue(ofType: Int128.self)
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: Int64.Type) throws -> Int64? {
+            guard let value = peekNextValueIfPresent(ofType: Int64.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeSignedInteger(value)
+        }
+
+        mutating func decode(_: UInt.Type) throws -> UInt {
+            let value = try peekNextValue(ofType: UInt.self)
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: UInt.Type) throws -> UInt? {
+            guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decode(_: UInt8.Type) throws -> UInt8 {
+            let value = try peekNextValue(ofType: UInt.self)
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: UInt8.Type) throws -> UInt8? {
+            guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decode(_: UInt16.Type) throws -> UInt16 {
+            let value = try peekNextValue(ofType: UInt.self)
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: UInt16.Type) throws -> UInt16? {
+            guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decode(_: UInt32.Type) throws -> UInt32 {
+            let value = try peekNextValue(ofType: UInt.self)
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: UInt32.Type) throws -> UInt32? {
+            guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decode(_: UInt64.Type) throws -> UInt64 {
+            let value = try peekNextValue(ofType: UInt.self)
+            return try decodeUnsignedInteger(value)
+        }
+      
+        @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+        mutating func decode(_: UInt128.Type) throws -> UInt128 {
+            let value = try peekNextValue(ofType: UInt.self)
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decodeIfPresent(_: UInt64.Type) throws -> UInt64? {
+            guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+                advanceToNextValue()
+                return nil
+            }
+            return try decodeUnsignedInteger(value)
+        }
+
+        mutating func decode<T: Decodable>(_ type: T.Type) throws -> T {
+            let value = try self.peekNextValue(ofType: type)
+            let result = try impl.with(value: value, path: codingPathNode.appending(index: currentIndex)) {
+                try impl.unbox(value, as: type)
             }
             advanceToNextValue()
             return result
         }
 
-        @inline(__always) private mutating func decodeFloatingPointIfPresent<T: PrevalidatedJSONNumberBufferConvertible & BinaryFloatingPoint>() throws -> T? {
-            let value = self.peekNextValueIfPresent(ofType: T.self)
-            let result: T? = switch value {
-            case nil, .null: nil
-            default: try impl.unwrapFloatingPoint(from: value.unsafelyUnwrapped, as: T.self, for: codingPathNode, currentIndexKey)
+        mutating func decodeIfPresent<T: Decodable>(_ type: T.Type) throws -> T? {
+            guard let value = self.peekNextValueIfPresent(ofType: type) else {
+                advanceToNextValue()
+                return nil
             }
+            if value.isNull {
+                advanceToNextValue()
+                return nil
+            }
+            let result = try impl.unbox(value, as: type)
             advanceToNextValue()
             return result
+        }
+
+        mutating func nestedContainer<NestedKey: CodingKey>(keyedBy type: NestedKey.Type) throws -> KeyedDecodingContainer<NestedKey> {
+            let value = try self.peekNextValue(ofType: KeyedDecodingContainer<NestedKey>.self)
+            let container = try impl.with(value: value, path: codingPathNode.appending(index: currentIndex)) {
+                try impl.container(keyedBy: type)
+            }
+            advanceToNextValue()
+            return container
+        }
+
+        mutating func nestedUnkeyedContainer() throws -> UnkeyedDecodingContainer {
+            let value = try self.peekNextValue(ofType: UnkeyedDecodingContainer.self)
+            let container = try impl.with(value: value, path: codingPathNode.appending(index: currentIndex)) {
+                try impl.unkeyedContainer()
+            }
+            advanceToNextValue()
+            return container
+        }
+
+        mutating func superDecoder() throws -> Decoder {
+            let value = try self.peekNextValue(ofType: Decoder.self)
+            let decoder = JSONDecoderImpl(
+                json: value,
+                userInfo: impl.userInfo,
+                codingPathNode: codingPathNode.appending(index: currentIndex),
+                options: impl.options
+            )
+            advanceToNextValue()
+            return decoder
+        }
+        
+        @inline(__always)
+        private mutating func decodeSignedInteger<T: SignedInteger>(_ jsonValue: JSON) throws -> T {
+            guard jsonValue.isSignedInteger else {
+                throw impl.createTypeMismatchError(type: T.self, for: currentCodingPath, value: jsonValue)
+            }
+            let value = jsonValue.signedIntegerValue
+            guard let int = T(exactly: value) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Number \(value) is not representable in Swift."
+                ))
+            }
+            advanceToNextValue()
+            return int
+        }
+        
+        @inline(__always)
+        private mutating func decodeUnsignedInteger<T: UnsignedInteger>(_ jsonValue: JSON) throws -> T {
+            guard jsonValue.isUnsignedInteger else {
+                throw impl.createTypeMismatchError(type: T.self, for: currentCodingPath, value: jsonValue)
+            }
+            let value = jsonValue.unsignedIntegerValue
+            guard let int = T(exactly: value) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Number \(value) is not representable in Swift."
+                ))
+            }
+            advanceToNextValue()
+            return int
         }
     }
 }
-
-
-

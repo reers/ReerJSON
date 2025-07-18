@@ -123,7 +123,7 @@ final class JSONDecoderImpl: Decoder {
             return try unboxDecimal() as! T
         }
         if T.self is StringDecodableDictionary.Type {
-            return try unboxDictionary()
+            return try unboxDictionary(from: value, additionalKey)
         }
         
         return try with(value: value, path: codingPathNode.appending(additionalKey)) {
@@ -229,7 +229,7 @@ final class JSONDecoderImpl: Decoder {
         }
     }
     
-    private func unboxDictionary<T: Decodable>() throws -> T {
+    private func unboxDictionary<T: Decodable, K: CodingKey>(from value: JSON, _ additionalKey: K? = nil) throws -> T {
         guard let dictType = T.self as? StringDecodableDictionary.Type else {
             preconditionFailure("Must only be called if T implements StringDecodableDictionary")
         }
@@ -263,12 +263,15 @@ final class JSONDecoderImpl: Decoder {
             }
             let key = String(cString: keyCString)
             
-            guard let valuePtr = yyjson_obj_iter_get_val(keyPtr) else {
+            guard yyjson_obj_iter_get_val(keyPtr) != nil else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
                     debugDescription: "Failed to get value for key '\(key)'."
                 ))
             }
+            
+            
+            
 #warning("fix")
             // TODO: - let keyPath = codingPath + [_CodingKey(stringValue: key)!]
             let keyPath = codingPath

@@ -111,11 +111,11 @@ extension JSON {
     
     @inline(__always)
     func integer<T: FixedWidthInteger>() -> T? {
-        if isSignedInteger {
-            return T(exactly: signedIntegerValue)
-        }
         if isUnsignedInteger {
             return T(exactly: unsignedIntegerValue)
+        }
+        if isSignedInteger {
+            return T(exactly: signedIntegerValue)
         }
         if let double = double {
             return T(exactly: double)

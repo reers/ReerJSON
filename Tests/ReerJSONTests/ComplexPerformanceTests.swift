@@ -20,7 +20,7 @@ final class ComplexPerformanceTests: XCTestCase {
         let timestamp: Double
         let data: ResponseData
         let pagination: Pagination
-//        let metadata: [String: String]
+        let metadata: [String: String]
     }
     
     struct ResponseData: Codable {
@@ -179,9 +179,9 @@ final class ComplexPerformanceTests: XCTestCase {
     }
     
     struct RevenueBreakdown: Codable {
-//        let products: [String: Double]
-//        let regions: [String: Double]
-//        let channels: [String: Double]
+        let products: [String: Double]
+        let regions: [String: Double]
+        let channels: [String: Double]
     }
     
     struct Address: Codable {
@@ -249,9 +249,9 @@ final class ComplexPerformanceTests: XCTestCase {
     }
     
     struct GeographyStats: Codable {
-//        let countries: [String: Int]
-//        let cities: [String: Int]
-//        let continents: [String: Int]
+        let countries: [String: Int]
+        let cities: [String: Int]
+        let continents: [String: Int]
     }
     
     struct Pagination: Codable {

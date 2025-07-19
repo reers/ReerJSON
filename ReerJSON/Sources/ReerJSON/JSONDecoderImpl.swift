@@ -9,7 +9,7 @@ final class JSONDecoderImpl: Decoder {
     var userInfo: [CodingUserInfoKey : Any]
     
 //    let value: yyjson_val
-    private let root: JSON
+    private var root: JSON
 //    let containers: JSONDecodingStorage
     let options: ReerJSONDecoder.Options
     
@@ -19,6 +19,7 @@ final class JSONDecoderImpl: Decoder {
     }
     
     init(json: JSON, userInfo: [CodingUserInfoKey: Any], codingPathNode: CodingPathNode, options: ReerJSONDecoder.Options) {
+//        print("~~~~JSONDecoderImplinit")
         self.root = json
         self.codingPathNode = codingPathNode
 //        self.containers = containers
@@ -85,7 +86,7 @@ final class JSONDecoderImpl: Decoder {
             debugDescription: "Expected to decode \(type) but found \(value.debugDataTypeDescription) instead."
         ))
     }
-
+    
     
     
     
@@ -234,25 +235,27 @@ final class JSONDecoderImpl: Decoder {
             preconditionFailure("Must only be called if T implements StringDecodableDictionary")
         }
         
-        guard topValue.isObject else {
+        guard value.isObject else {
             throw DecodingError.typeMismatch([String: Any].self, .init(
                 codingPath: codingPath,
-                debugDescription: "Expected to decode \([String: Any].self) but found \(topValue.debugDataTypeDescription) instead."
+                debugDescription: "Expected to decode \([String: Any].self) but found \(value.debugDataTypeDescription) instead."
             ))
         }
         
         var result = [String: Any]()
         
-        let objSize = yyjson_obj_size(topValue.pointer)
+        let objSize = yyjson_obj_size(value.pointer)
         result.reserveCapacity(Int(objSize))
         
         var iter = yyjson_obj_iter()
-        guard yyjson_obj_iter_init(topValue.pointer, &iter) else {
+        guard yyjson_obj_iter_init(value.pointer, &iter) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Failed to initialize object iterator."
             ))
         }
+        
+        let valueType = dictType.elementType
         
         while let keyPtr = yyjson_obj_iter_next(&iter) {
             guard let keyCString = yyjson_get_str(keyPtr) else {
@@ -263,29 +266,15 @@ final class JSONDecoderImpl: Decoder {
             }
             let key = String(cString: keyCString)
             
-            guard yyjson_obj_iter_get_val(keyPtr) != nil else {
+            guard let valuePtr = yyjson_obj_iter_get_val(keyPtr) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
                     debugDescription: "Failed to get value for key '\(key)'."
                 ))
             }
+            let elementValue = JSON(pointer: valuePtr)
             
-            
-            
-#warning("fix")
-            // TODO: - let keyPath = codingPath + [_CodingKey(stringValue: key)!]
-            let keyPath = codingPath
-            
-            //  TODO: - 创建新的decoder来解码值, 性能????
-            let valueDecoder = JSONDecoderImpl(
-                json: topValue,
-                userInfo: userInfo,
-                codingPathNode: .root,
-                options: options
-            )
-//            valueDecoder.codingPath = keyPath
-            
-            let decodedValue = try dictType.elementType.init(from: valueDecoder)
+            let decodedValue = try unbox(elementValue, as: valueType, _CodingKey(stringValue: key))
             result[key] = decodedValue
         }
         
@@ -412,41 +401,10 @@ extension JSONDecoderImpl {
 
         let impl: JSONDecoderImpl
         let codingPathNode: CodingPathNode
-        let dictionary: [String: JSON]
-
-        static func stringify(impl: JSONDecoderImpl) throws -> [String: JSON] {
-            var iter = yyjson_obj_iter()
-            guard yyjson_obj_iter_init(impl.topValue.pointer, &iter) else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: impl.codingPath,
-                    debugDescription: "Failed to initialize object iterator."
-                ))
-            }
-            var result: [String: JSON] = [:]
-            while let keyPtr = yyjson_obj_iter_next(&iter) {
-                guard let keyCString = yyjson_get_str(keyPtr) else {
-                    throw DecodingError.dataCorrupted(.init(
-                        codingPath: impl.codingPath,
-                        debugDescription: "Object key is not a valid string."
-                    ))
-                }
-                let key = String(cString: keyCString)
-                
-                guard let valuePtr = yyjson_obj_iter_get_val(keyPtr) else {
-                    throw DecodingError.dataCorrupted(.init(
-                        codingPath: impl.codingPath,
-                        debugDescription: "Failed to get value for key '\(key)'."
-                    ))
-                }
-                result[key]._setIfNil(to: JSON(pointer: valuePtr))
-            }
-            return result
-        }
 
         init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) throws {
             self.impl = impl
             self.codingPathNode = codingPathNode
-            self.dictionary = try Self.stringify(impl: impl)
         }
 
         public var codingPath : [CodingKey] {
@@ -454,11 +412,23 @@ extension JSONDecoderImpl {
         }
 
         var allKeys: [K] {
-            return dictionary.keys.compactMap { K(stringValue: $0) }
+            var keys: [K] = []
+            var iter = yyjson_obj_iter()
+            let topValuePtr = impl.topValue.pointer
+            guard yyjson_obj_iter_init(topValuePtr, &iter) else {
+                return []
+            }
+            keys.reserveCapacity(Int(yyjson_obj_size(topValuePtr)))
+            while let keyPtr = yyjson_obj_iter_next(&iter) {
+                if let keyCString = yyjson_get_str(keyPtr), let key = K(stringValue: String(cString: keyCString)) {
+                    keys.append(key)
+                }
+            }
+            return keys
         }
 
         func contains(_ key: K) -> Bool {
-            return dictionary.keys.contains(key.stringValue)
+            return yyjson_obj_get(impl.topValue.pointer, key.stringValue) != nil
         }
 
         func decodeNil(forKey key: K) throws -> Bool {
@@ -722,32 +692,28 @@ extension JSONDecoderImpl {
         }
 
         private func decoderForKeyNoThrow(_ key: some CodingKey) -> JSONDecoderImpl {
-            let value: JSON
-            do {
-                value = try getValue(forKey: key)
-            } catch {
-#warning("test")
-                // if there no value for this key then return a null value
-                value = .init(pointer: nil)
-            }
-            let impl = JSONDecoderImpl(json: value, userInfo: impl.userInfo, codingPathNode: impl.codingPathNode, options: impl.options)
+            let value: JSON = getValueIfPresent(forKey: key) ?? .init(pointer: nil)
+            let impl = JSONDecoderImpl(json: value, userInfo: impl.userInfo, codingPathNode: impl.codingPathNode.appending(key), options: impl.options)
             return impl
         }
 
         @inline(__always)
         private func getValue(forKey key: some CodingKey) throws -> JSON {
-            guard let value = dictionary[key.stringValue] else {
+            guard let valuePtr = yyjson_obj_get(impl.topValue.pointer, key.stringValue) else {
                 throw DecodingError.keyNotFound(key, .init(
                     codingPath: codingPath,
                     debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
                 ))
             }
-            return value
+            return JSON(pointer: valuePtr)
         }
 
         @inline(__always)
         private func getValueIfPresent(forKey key: some CodingKey) -> JSON? {
-            dictionary[key.stringValue]
+            guard let valuePtr = yyjson_obj_get(impl.topValue.pointer, key.stringValue) else {
+                return nil
+            }
+            return JSON(pointer: valuePtr)
         }
 
         private func createTypeMismatchError(type: Any.Type, forKey key: K, value: JSON) -> DecodingError {

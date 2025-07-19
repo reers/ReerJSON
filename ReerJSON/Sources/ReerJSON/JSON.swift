@@ -33,7 +33,7 @@ struct YYJSONSubtype: RawRepresentable, Equatable {
     static let noesc = YYJSONSubtype(rawValue: 1 << 3)
 }
 
-final class JSON {
+struct JSON {
     let pointer: UnsafeMutablePointer<yyjson_val>?
     
     init(pointer: UnsafeMutablePointer<yyjson_val>?) {

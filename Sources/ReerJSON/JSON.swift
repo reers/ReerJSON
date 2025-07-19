@@ -50,10 +50,12 @@ struct JSON {
 }
 
 extension JSON {
+    @inline(__always)
     var type: YYJSONType {
         return YYJSONType(rawValue: yyjson_get_type(pointer)) ?? .none
     }
     
+    @inline(__always)
     var subtype: YYJSONSubtype {
         return YYJSONSubtype(rawValue: yyjson_get_subtype(pointer))
     }

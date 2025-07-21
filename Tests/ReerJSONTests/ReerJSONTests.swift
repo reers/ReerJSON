@@ -583,7 +583,7 @@ final class ReerJSONTests: XCTestCase {
             let jsonData = largeJsonString.data(using: .utf8)!
             
             let reerDecoder = ReerJSONDecoder()
-            let foundationDecoder = JSONDecoder()
+            _ = JSONDecoder()
             
             // 测试 ReerJSON 性能
             measure {

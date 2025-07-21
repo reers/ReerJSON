@@ -313,10 +313,7 @@ final class JSONDecoderImpl: Decoder {
     func unboxDouble<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> Double {
         try checkNotNull(value, expectedType: Double.self, for: codingPathNode, additionalKey)
         
-        guard let double = value.double else {
-            throw createTypeMismatchError(type: Double.self, for: codingPath, value: value)
-        }
-        return double
+        return try unboxFloatingPoint(from: value, as: Double.self)
     }
 }
 
@@ -342,24 +339,11 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
 
     func decode(_: Double.Type) throws -> Double {
-        guard let double = topValue.double else {
-            throw createTypeMismatchError(type: Double.self, for: codingPath, value: topValue)
-        }
-        return double
+        try unboxFloatingPoint(from: topValue, as: Double.self)
     }
 
     func decode(_: Float.Type) throws -> Float {
-        guard topValue.isNumber else {
-            throw createTypeMismatchError(type: Float.self, for: codingPath, value: topValue)
-        }
-        let doubleValue = topValue.numberValue
-        guard let floatValue = Float(exactly: doubleValue) else {
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: codingPath,
-                debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
-            ))
-        }
-        return floatValue
+        try unboxFloatingPoint(from: topValue, as: Float.self)
     }
 
     func decode(_: Int.Type) throws -> Int {
@@ -428,6 +412,46 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
             ))
         }
         return int
+    }
+}
+
+// MARK: - Unboxing Helpers
+
+private extension JSONDecoderImpl {
+    func unboxFloatingPoint<F: BinaryFloatingPoint>(from value: JSON, as type: F.Type) throws -> F where F: LosslessStringConvertible {
+        if let doubleValue = value.double {
+            
+            guard doubleValue.isFinite else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Number \(value.debugDataTypeDescription) is not representable in Swift."
+                ))
+            }
+
+            guard let floatValue = F(exactly: doubleValue) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a \(F.self) without loss of precision."
+                ))
+            }
+            return floatValue
+        }
+
+        // Try to decode from a string, for non-conforming float strategy.
+        if case .convertFromString(let posInf, let negInf, let nan) = options.nonConformingFloatDecodingStrategy,
+           let string = value.string {
+            if string == posInf {
+                return F.infinity
+            }
+            if string == negInf {
+                return -F.infinity
+            }
+            if string == nan {
+                return F.nan
+            }
+        }
+        
+        throw self.createTypeMismatchError(type: F.self, for: codingPath, value: value)
     }
 }
 
@@ -513,54 +537,26 @@ extension JSONDecoderImpl {
 
         func decode(_: Double.Type, forKey key: K) throws -> Double {
             let jsonValue = try getValue(forKey: key)
-            guard let double = jsonValue.double else {
-                throw createTypeMismatchError(type: Double.self, forKey: key, value: jsonValue)
-            }
-            return double
+            return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self)
         }
 
         func decodeIfPresent(_: Double.Type, forKey key: K) throws -> Double? {
-            guard let jsonValue = getValueIfPresent(forKey: key) else {
+            guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
                 return nil
             }
-            if jsonValue.isNull { return nil }
-            guard let double = jsonValue.double else {
-                throw createTypeMismatchError(type: Double.self, forKey: key, value: jsonValue)
-            }
-            return double
+            return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self)
         }
 
         func decode(_: Float.Type, forKey key: K) throws -> Float {
             let jsonValue = try getValue(forKey: key)
-            guard jsonValue.isNumber else {
-                throw createTypeMismatchError(type: Float.self, forKey: key, value: jsonValue)
-            }
-            let doubleValue = jsonValue.numberValue
-            guard let floatValue = Float(exactly: doubleValue) else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
-                ))
-            }
-            return floatValue
+            return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self)
         }
 
-        func decodeIfPresent(_: Float.Type, forKey key: K) throws -> Float? {
-            guard let jsonValue = getValueIfPresent(forKey: key) else {
+        func decodeIfPresent(_ type: Float.Type, forKey key: K) throws -> Float? {
+            guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
                 return nil
             }
-            if jsonValue.isNull { return nil }
-            guard jsonValue.isNumber else {
-                throw createTypeMismatchError(type: Float.self, forKey: key, value: jsonValue)
-            }
-            let doubleValue = jsonValue.numberValue
-            guard let floatValue = Float(exactly: doubleValue) else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
-                ))
-            }
-            return floatValue
+            return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self)
         }
         
         func decode(_: Int.Type, forKey key: K) throws -> Int {
@@ -933,58 +929,36 @@ extension JSONDecoderImpl {
 
         mutating func decode(_: Double.Type) throws -> Double {
             let value = try peekNextValue(ofType: Double.self)
-            guard let double = value.double else {
-                throw impl.createTypeMismatchError(type: Double.self, for: currentCodingPath, value: value)
-            }
+            let result = try impl.unboxFloatingPoint(from: value, as: Double.self)
             advanceToNextValue()
-            return double
+            return result
         }
 
         mutating func decodeIfPresent(_ type: Double.Type) throws -> Double? {
-            guard let value = peekNextValueIfPresent(ofType: Double.self) else {
+            guard let value = peekNextValueIfPresent(ofType: Double.self), !value.isNull else {
                 advanceToNextValue()
                 return nil
             }
-            guard let double = value.double else {
-                throw impl.createTypeMismatchError(type: type, for: currentCodingPath, value: value)
-            }
+            let result = try impl.unboxFloatingPoint(from: value, as: Double.self)
             advanceToNextValue()
-            return double
+            return result
         }
 
         mutating func decode(_: Float.Type) throws -> Float {
             let value = try peekNextValue(ofType: Float.self)
-            guard value.isNumber else {
-                throw impl.createTypeMismatchError(type: Float.self, for: currentCodingPath, value: value)
-            }
-            let doubleValue = value.numberValue
-            guard let floatValue = Float(exactly: doubleValue) else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
-                ))
-            }
+            let result = try impl.unboxFloatingPoint(from: value, as: Float.self)
             advanceToNextValue()
-            return floatValue
+            return result
         }
 
         mutating func decodeIfPresent(_ type: Float.Type) throws -> Float? {
-            guard let value = peekNextValueIfPresent(ofType: Float.self) else {
+            guard let value = peekNextValueIfPresent(ofType: Float.self), !value.isNull else {
                 advanceToNextValue()
                 return nil
             }
-            guard value.isNumber else {
-                throw impl.createTypeMismatchError(type: Float.self, for: currentCodingPath, value: value)
-            }
-            let doubleValue = value.numberValue
-            guard let floatValue = Float(exactly: doubleValue) else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a Float without loss of precision."
-                ))
-            }
+            let result = try impl.unboxFloatingPoint(from: value, as: Float.self)
             advanceToNextValue()
-            return floatValue
+            return result
         }
       
 

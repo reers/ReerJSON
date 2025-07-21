@@ -154,13 +154,13 @@ final class JSONDecoderImpl: Decoder {
                 try Date(from: self)
             }
         case .secondsSince1970:
-            let double = try decode(Double.self)
+            let double = try unboxDouble(from: value, for: codingPathNode, additionalKey)
             return Date(timeIntervalSince1970: double)
         case .millisecondsSince1970:
-            let double = try decode(Double.self)
+            let double = try unboxDouble(from: value, for: codingPathNode, additionalKey)
             return Date(timeIntervalSince1970: double / 1000.0)
         case .iso8601:
-            let string = try decode(String.self)
+            let string = try unboxString(from: value, for: codingPathNode, additionalKey)
             guard let date = _iso8601Formatter.date(from: string) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -169,7 +169,7 @@ final class JSONDecoderImpl: Decoder {
             }
             return date
         case .formatted(let formatter):
-            let string = try decode(String.self)
+            let string = try unboxString(from: value, for: codingPathNode, additionalKey)
             guard let date = formatter.date(from: string) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -195,7 +195,7 @@ final class JSONDecoderImpl: Decoder {
                 try Data(from: self)
             }
         case .base64:
-            let string = try decode(String.self)
+            let string = try unboxString(from: value, for: codingPathNode, additionalKey)
             guard let data = Data(base64Encoded: string) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -215,7 +215,7 @@ final class JSONDecoderImpl: Decoder {
     private func unboxURL<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> URL {
         try checkNotNull(value, expectedType: URL.self, for: codingPathNode, additionalKey)
         
-        let string = try decode(String.self)
+        let string = try unboxString(from: value, for: codingPathNode, additionalKey)
         guard let url = URL(string: string) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
@@ -230,11 +230,11 @@ final class JSONDecoderImpl: Decoder {
         
         switch value.subtype {
         case .uint:
-            return Decimal(topValue.unsignedIntegerValue)
+            return Decimal(value.unsignedIntegerValue)
         case .sint:
-            return Decimal(topValue.signedIntegerValue)
+            return Decimal(value.signedIntegerValue)
         case .real:
-            let doubleValue = topValue.realValue
+            let doubleValue = value.realValue
             guard doubleValue.isFinite else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
@@ -299,6 +299,24 @@ final class JSONDecoderImpl: Decoder {
         }
         
         return result as! T
+    }
+    
+    func unboxString<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> String {
+        try checkNotNull(value, expectedType: String.self, for: codingPathNode, additionalKey)
+        
+        guard let string = value.string else {
+            throw createTypeMismatchError(type: String.self, for: codingPath, value: value)
+        }
+        return string
+    }
+
+    func unboxDouble<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> Double {
+        try checkNotNull(value, expectedType: Double.self, for: codingPathNode, additionalKey)
+        
+        guard let double = value.double else {
+            throw createTypeMismatchError(type: Double.self, for: codingPath, value: value)
+        }
+        return double
     }
 }
 

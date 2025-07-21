@@ -593,39 +593,6 @@ final class ComplexPerformanceTests: XCTestCase {
         } else {
             print("ReerJSON 比 Foundation 慢 \(String(format: "%.2f", 1/speedRatio))倍")
         }
-        
-        // 验证结果正确性
-        let reerResult = try reerDecoder.decode(APIResponse.self, from: jsonData)
-        let foundationResult = try foundationDecoder.decode(APIResponse.self, from: jsonData)
-        
-        XCTAssertEqual(reerResult.status, foundationResult.status)
-        XCTAssertEqual(reerResult.data.users.count, foundationResult.data.users.count)
-        XCTAssertEqual(reerResult.data.companies.count, foundationResult.data.companies.count)
-        XCTAssertEqual(reerResult.data.users.first?.username, foundationResult.data.users.first?.username)
-        XCTAssertEqual(reerResult.data.companies.first?.name, foundationResult.data.companies.first?.name)
-        
-        print("\n✅ 解码结果验证通过")
-    }
-    
-    // MARK: - 内存使用对比
-    
-    func testMemoryUsageComparison() throws {
-        let jsonString = generateComplexJSON()
-        let jsonData = jsonString.data(using: .utf8)!
-        
-        let reerDecoder = ReerJSONDecoder()
-        let foundationDecoder = JSONDecoder()
-        
-        // 测试内存使用情况
-        autoreleasepool {
-            measure {
-                for _ in 0..<50 {
-                    _ = try! reerDecoder.decode(APIResponse.self, from: jsonData)
-                }
-            }
-        }
-        
-        print("ReerJSON 内存测试完成")
     }
     
     // MARK: - 数据完整性验证

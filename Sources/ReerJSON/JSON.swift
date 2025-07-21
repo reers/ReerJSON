@@ -50,6 +50,7 @@ struct JSON {
 }
 
 extension JSON {
+    
     @inline(__always)
     var type: YYJSONType {
         return YYJSONType(rawValue: yyjson_get_type(pointer)) ?? .none
@@ -62,51 +63,64 @@ extension JSON {
 }
 
 extension JSON {
+    
+    @inline(__always)
     var isNull: Bool {
         return yyjson_is_null(pointer)
     }
     
+    @inline(__always)
     var bool: Bool? {
         return yyjson_is_bool(pointer) ? unsafe_yyjson_get_bool(pointer) : nil
     }
     
+    @inline(__always)
     var string: String? {
         guard let cString = yyjson_get_str(pointer) else { return nil }
         return String(cString: cString)
     }
     
+    @inline(__always)
     var double: Double? {
         return yyjson_is_num(pointer) ? yyjson_get_num(pointer) : nil
     }
     
+    @inline(__always)
     var isNumber: Bool {
         return yyjson_is_num(pointer)
     }
     
+    @inline(__always)
     var numberValue: Double {
         return yyjson_get_num(pointer)
     }
     
+    @inline(__always)
     var isSignedInteger: Bool {
         return yyjson_is_sint(pointer)
     }
     
+    @inline(__always)
     var signedIntegerValue: Int64 {
         return yyjson_get_sint(pointer)
     }
     
+    @inline(__always)
     var isUnsignedInteger: Bool {
         return yyjson_is_uint(pointer)
     }
     
+    @inline(__always)
     var unsignedIntegerValue: UInt64 {
         return yyjson_get_uint(pointer)
     }
     
+    @inline(__always)
     var realValue: Double {
         return yyjson_get_real(pointer)
     }
     
+    @inline(__always)
     var isObject: Bool {
         return yyjson_is_obj(pointer)
     }

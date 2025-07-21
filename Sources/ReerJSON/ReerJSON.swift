@@ -1,9 +1,5 @@
 import Foundation
 import yyjson
-//#if !os(Linux)
-//import JJLISO8601DateFormatter
-//#endif
-
 
 open class ReerJSONDecoder {
     /// The strategy to use in decoding dates. Defaults to `.deferredToDate`.
@@ -100,7 +96,7 @@ open class ReerJSONDecoder {
 
     /// Contextual user-provided information for use during decoding.
     @preconcurrency
-    open var userInfo: [CodingUserInfoKey : any Sendable] {
+    open var userInfo: [CodingUserInfoKey: any Sendable] {
         get {
             optionsLock.lock()
             defer { optionsLock.unlock() }
@@ -128,7 +124,7 @@ open class ReerJSONDecoder {
         var dataDecodingStrategy: JSONDecoder.DataDecodingStrategy = .base64
         var nonConformingFloatDecodingStrategy: JSONDecoder.NonConformingFloatDecodingStrategy = .throw
         var keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy = .useDefaultKeys
-        var userInfo: [CodingUserInfoKey : any Sendable] = [:]
+        var userInfo: [CodingUserInfoKey: any Sendable] = [:]
         var json5: Bool = false
     }
 
@@ -155,7 +151,7 @@ open class ReerJSONDecoder {
             yyjson_read($0.bindMemory(to: CChar.self).baseAddress, data.count, 0)
         }
         guard let doc else {
-            throw JSONError.readJSONDocumentFailed
+            return try decode(type, from: data)
         }
         
         defer {
@@ -163,26 +159,17 @@ open class ReerJSONDecoder {
         }
         
         let json = JSON(pointer: yyjson_doc_get_root(doc))
-        let startTime = CFAbsoluteTimeGetCurrent()
-        
-        
         let impl = JSONDecoderImpl(json: json, userInfo: userInfo, codingPathNode: .root, options: options)
-        
-//        let endTime = CFAbsoluteTimeGetCurrent()
-//        print("~~~~ delta \(String(format: "%.4f", (endTime - startTime) * 1000)) ms")
-        
         return try impl.unbox(json, as: type, _CodingKey?.none)
     }
     
     func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data, reason: String?) throws -> T {
-        let appleDecoder = Foundation.JSONDecoder()
-        appleDecoder.dataDecodingStrategy = dataDecodingStrategy
-        appleDecoder.dateDecodingStrategy = dateDecodingStrategy
-        appleDecoder.keyDecodingStrategy = keyDecodingStrategy
-        appleDecoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
-        appleDecoder.userInfo = userInfo
-        return try appleDecoder.decode(type, from: data)
+        let decoder = Foundation.JSONDecoder()
+        decoder.dataDecodingStrategy = dataDecodingStrategy
+        decoder.dateDecodingStrategy = dateDecodingStrategy
+        decoder.keyDecodingStrategy = keyDecodingStrategy
+        decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
+        decoder.userInfo = userInfo
+        return try decoder.decode(type, from: data)
     }
-    
-    
 }

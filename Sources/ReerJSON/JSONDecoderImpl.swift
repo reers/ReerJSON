@@ -6,11 +6,7 @@ import JJLISO8601DateFormatter
 
 final class JSONDecoderImpl: Decoder {
     
-    var userInfo: [CodingUserInfoKey : Any]
-    
-//    let value: yyjson_val
-    private var root: JSON
-//    let containers: JSONDecodingStorage
+    var userInfo: [CodingUserInfoKey: Any]
     let options: ReerJSONDecoder.Options
     
     var codingPathNode: CodingPathNode
@@ -19,10 +15,8 @@ final class JSONDecoderImpl: Decoder {
     }
     
     init(json: JSON, userInfo: [CodingUserInfoKey: Any], codingPathNode: CodingPathNode, options: ReerJSONDecoder.Options) {
-//        print("~~~~JSONDecoderImplinit")
-        self.root = json
+
         self.codingPathNode = codingPathNode
-//        self.containers = containers
         self.userInfo = userInfo
         self.options = options
         push(value: json)
@@ -86,9 +80,6 @@ final class JSONDecoderImpl: Decoder {
             debugDescription: "Expected to decode \(type) but found \(value.debugDataTypeDescription) instead."
         ))
     }
-    
-    
-    
     
     // Instead of creating a new JSONDecoderImpl for passing to methods that take Decoder arguments, wrap the access in this method, which temporarily mutates this JSONDecoderImpl instance with the nested value and its coding path.
     @inline(__always)

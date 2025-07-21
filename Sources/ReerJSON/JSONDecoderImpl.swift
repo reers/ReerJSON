@@ -1132,9 +1132,7 @@ extension JSONDecoderImpl {
 
         mutating func decode<T: Decodable>(_ type: T.Type) throws -> T {
             let value = try self.peekNextValue(ofType: type)
-            let result = try impl.with(value: value, path: codingPathNode.appending(index: currentIndex)) {
-                try impl.unbox(value, as: type, for: codingPathNode, currentIndexKey)
-            }
+            let result = try impl.unbox(value, as: type, for: codingPathNode, currentIndexKey)
             advanceToNextValue()
             return result
         }

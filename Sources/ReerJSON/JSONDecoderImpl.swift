@@ -796,8 +796,8 @@ extension JSONDecoderImpl {
 extension JSONDecoderImpl {
     struct UnkeyedContainer: UnkeyedDecodingContainer {
         let impl: JSONDecoderImpl
-        var arrayPointer: UnsafeMutablePointer<yyjson_val>? // 指向数组的指针
-        var peekedValue: JSON? // 预先偷看的下一个值
+        var arrayPointer: UnsafeMutablePointer<yyjson_val>?
+        var peekedValue: JSON?
         let count: Int?
 
         var isAtEnd: Bool { self.currentIndex >= (self.count ?? 0) }
@@ -808,7 +808,6 @@ extension JSONDecoderImpl {
             self.codingPathNode = codingPathNode
             self.arrayPointer = impl.topValue.pointer
             
-            // 获取数组长度
             self.count = Int(yyjson_arr_size(arrayPointer))
         }
 
@@ -830,37 +829,33 @@ extension JSONDecoderImpl {
 
         private mutating func advanceToNextValue() {
             currentIndex += 1
-            peekedValue = nil // 清空预览值，下次需要重新偷看
+            peekedValue = nil
         }
 
-        // 偷看下一个值，但不移动索引 - 可能没有值
         @inline(__always)
         private mutating func peekNextValueIfPresent<T>(ofType type: T.Type) -> JSON? {
             if let value = peekedValue {
-                return value // 如果之前已经偷看过了，直接返回
+                return value
             }
             
             guard currentIndex < (count ?? 0) else {
-                return nil // 没有下一个值了
+                return nil
             }
             
-            // 从数组中获取当前索引的元素
             guard let elementPtr = yyjson_arr_get(arrayPointer, currentIndex) else {
                 return nil
             }
             
             let nextValue = JSON(pointer: elementPtr)
             if nextValue.isNull { return nil }
-            peekedValue = nextValue // 记住这个偷看的值
+            peekedValue = nextValue
             return nextValue
         }
 
-        // 偷看下一个值，如果没有就抛出错误
         @inline(__always)
         private mutating func peekNextValue<T>(ofType type: T.Type) throws -> JSON {
             guard let nextValue = peekNextValueIfPresent(ofType: type) else {
-                // 根据不同类型生成不同的错误信息
-                var message = "Unkeyed container is at end." // 数组已经读完了
+                var message = "Unkeyed container is at end."
                 if T.self == UnkeyedContainer.self {
                     message = "Cannot get nested unkeyed container -- unkeyed container is at end."
                 }
@@ -886,7 +881,8 @@ extension JSONDecoderImpl {
                 advanceToNextValue()
                 return true
             } else {
-                // 协议规定：如果不是null，不要移动索引
+                // The protocol states:
+                // If the value is not null, does not increment currentIndex.
                 return false
             }
         }

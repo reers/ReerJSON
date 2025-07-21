@@ -27,12 +27,14 @@ final class JSONDecoderImpl: Decoder {
     @inline(__always)
     var topValue : JSON { values.last! }
     
+    @inline(__always)
     func push(value: __owned JSON) {
-        self.values.append(value)
+        values.append(value)
     }
     
+    @inline(__always)
     func popValue() {
-        self.values.removeLast()
+        values.removeLast()
     }
     
     func container<Key: CodingKey>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> {
@@ -101,7 +103,26 @@ final class JSONDecoderImpl: Decoder {
     }
     
     @inline(__always)
-    func unbox<T: Decodable>(_ value: JSON, as type: T.Type, _ additionalKey: (some CodingKey)? = nil) throws -> T {
+    func checkNotNull<T>(
+        _ value: JSON,
+        expectedType: T.Type,
+        for codingPathNode: CodingPathNode,
+        _ additionalKey: (some CodingKey)? = nil
+    ) throws {
+        if value.isNull {
+            throw DecodingError.valueNotFound(expectedType, DecodingError.Context(
+                codingPath: codingPathNode.path(byAppending: additionalKey),
+                debugDescription: "Cannot get value of type \(expectedType) -- found null value instead"
+            ))
+        }
+    }
+    
+    @inline(__always)
+    func unbox<T: Decodable>(
+        _ value: JSON,
+        as type: T.Type,
+        _ additionalKey: (some CodingKey)? = nil
+    ) throws -> T {
         if type == Date.self {
             return try unboxDate(from: value, additionalKey) as! T
         }

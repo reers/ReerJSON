@@ -17,7 +17,7 @@ enum CodingPathNode : Sendable {
     indirect case node(CodingKey, CodingPathNode, depth: Int)
     indirect case indexNode(Int, CodingPathNode, depth: Int)
 
-    var path : [CodingKey] {
+    var path: [CodingKey] {
         switch self {
         case .root:
             return []

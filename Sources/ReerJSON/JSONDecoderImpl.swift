@@ -315,6 +315,42 @@ final class JSONDecoderImpl: Decoder {
         
         return try unboxFloatingPoint(from: value, as: Double.self)
     }
+    
+    func unboxFloatingPoint<F: BinaryFloatingPoint>(from value: JSON, as type: F.Type) throws -> F where F: LosslessStringConvertible {
+        if let doubleValue = value.double {
+            
+            guard doubleValue.isFinite else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "Number \(value.debugDataTypeDescription) is not representable in Swift."
+                ))
+            }
+
+            guard let floatValue = F(exactly: doubleValue) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: codingPath,
+                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a \(F.self) without loss of precision."
+                ))
+            }
+            return floatValue
+        }
+
+        // Try to decode from a string, for non-conforming float strategy.
+        if case .convertFromString(let posInf, let negInf, let nan) = options.nonConformingFloatDecodingStrategy,
+           let string = value.string {
+            if string == posInf {
+                return F.infinity
+            }
+            if string == negInf {
+                return -F.infinity
+            }
+            if string == nan {
+                return F.nan
+            }
+        }
+        
+        throw self.createTypeMismatchError(type: F.self, for: codingPath, value: value)
+    }
 }
 
 // MARK: - SingleValueDecodingContainer
@@ -412,46 +448,6 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
             ))
         }
         return int
-    }
-}
-
-// MARK: - Unboxing Helpers
-
-private extension JSONDecoderImpl {
-    func unboxFloatingPoint<F: BinaryFloatingPoint>(from value: JSON, as type: F.Type) throws -> F where F: LosslessStringConvertible {
-        if let doubleValue = value.double {
-            
-            guard doubleValue.isFinite else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "Number \(value.debugDataTypeDescription) is not representable in Swift."
-                ))
-            }
-
-            guard let floatValue = F(exactly: doubleValue) else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a \(F.self) without loss of precision."
-                ))
-            }
-            return floatValue
-        }
-
-        // Try to decode from a string, for non-conforming float strategy.
-        if case .convertFromString(let posInf, let negInf, let nan) = options.nonConformingFloatDecodingStrategy,
-           let string = value.string {
-            if string == posInf {
-                return F.infinity
-            }
-            if string == negInf {
-                return -F.infinity
-            }
-            if string == nan {
-                return F.nan
-            }
-        }
-        
-        throw self.createTypeMismatchError(type: F.self, for: codingPath, value: value)
     }
 }
 

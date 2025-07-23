@@ -460,6 +460,7 @@ extension JSONDecoderImpl {
         let impl: JSONDecoderImpl
         let codingPathNode: CodingPathNode
         let valuePointer: UnsafeMutablePointer<yyjson_val>?
+        let keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy
         
 //        private let keyValues: [String: JSON] = {
 //            var result: [String: JSON] = [:]
@@ -508,26 +509,16 @@ extension JSONDecoderImpl {
 //            return result
 //        }()
         
-        var keyValues: [String: JSON] = [:]
-
-        init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) throws {
-            self.impl = impl
-            self.codingPathNode = codingPathNode
-            self.valuePointer = impl.topValue.pointer
-            
-            getKeyValues()
-        }
-        
-        private func getKeyValues() {
+        private lazy var keyValues: [String: JSON] = {
             var result: [String: JSON] = [:]
             var iter = yyjson_obj_iter()
             
             guard yyjson_obj_iter_init(valuePointer, &iter) else {
-                return
+                return [:]
             }
             result.reserveCapacity(Int(yyjson_obj_size(valuePointer)))
             
-            switch impl.options.keyDecodingStrategy {
+            switch keyDecodingStrategy {
             case .useDefaultKeys:
                 while let keyPtr = yyjson_obj_iter_next(&iter) {
                     if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
@@ -562,7 +553,19 @@ extension JSONDecoderImpl {
                 }
             }
             
-            keyValues = result
+            return result
+        }()
+
+        init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) throws {
+            self.impl = impl
+            self.codingPathNode = codingPathNode
+            self.valuePointer = impl.topValue.pointer
+            self.keyDecodingStrategy = impl.options.keyDecodingStrategy
+//            getKeyValues()
+        }
+        
+        private func getKeyValues() {
+            
         }
 
         public var codingPath : [CodingKey] {
@@ -929,18 +932,39 @@ extension JSONDecoderImpl {
 //                ))
 //            }
 //            return JSON(pointer: valuePtr)
-            guard let value = keyValues[key.stringValue] else {
+            
+            let stringKey: String
+            switch keyDecodingStrategy {
+            case .useDefaultKeys:
+                stringKey = key.stringValue
+            case .convertFromSnakeCase:
+                stringKey = key.stringValue
+            case .custom(let _):
+                stringKey = key.stringValue
+            @unknown default:
+                stringKey = key.stringValue
+            }
+            
+            
+            guard let valuePtr = yyjson_obj_get(valuePointer, stringKey) else {
+//            guard let value = keyValues[key.stringValue] else {
                 throw DecodingError.keyNotFound(key, .init(
                     codingPath: codingPath,
                     debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
                 ))
             }
-            return value
+            return JSON(pointer: valuePtr)
         }
 
         @inline(__always)
         private func getValueIfPresent(forKey key: some CodingKey) -> JSON? {
-            return keyValues[key.stringValue]
+            guard let valuePtr = yyjson_obj_get(valuePointer, key.stringValue) else {
+//            guard let value = keyValues[key.stringValue] else {
+                return nil
+            }
+            return JSON(pointer: valuePtr)
+            
+//            return keyValues[key.stringValue]
 //            guard let jsonKey = impl.findJSONKey(for: key),
 //                  let valuePtr = yyjson_obj_get(impl.topValue.pointer, jsonKey) else {
 //                return nil

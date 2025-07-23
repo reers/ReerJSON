@@ -454,7 +454,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
 // MARK: - KeyedDecodingContainerProtocol
 
 extension JSONDecoderImpl {
-    struct KeyedContainer<K: CodingKey>: KeyedDecodingContainerProtocol {
+    class KeyedContainer<K: CodingKey>: KeyedDecodingContainerProtocol {
         typealias Key = K
 
         let impl: JSONDecoderImpl
@@ -518,7 +518,7 @@ extension JSONDecoderImpl {
             getKeyValues()
         }
         
-        private mutating func getKeyValues() {
+        private func getKeyValues() {
             var result: [String: JSON] = [:]
             var iter = yyjson_obj_iter()
             

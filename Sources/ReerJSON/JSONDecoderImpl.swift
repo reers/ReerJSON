@@ -459,10 +459,110 @@ extension JSONDecoderImpl {
 
         let impl: JSONDecoderImpl
         let codingPathNode: CodingPathNode
+        let valuePointer: UnsafeMutablePointer<yyjson_val>?
+        
+//        private let keyValues: [String: JSON] = {
+//            var result: [String: JSON] = [:]
+//            var iter = yyjson_obj_iter()
+//            
+//            guard yyjson_obj_iter_init(valuePointer, &iter) else {
+//                return [:]
+//            }
+//            result.reserveCapacity(Int(yyjson_obj_size(valuePointer)))
+//            
+//            switch impl.options.keyDecodingStrategy {
+//            case .useDefaultKeys:
+//                while let keyPtr = yyjson_obj_iter_next(&iter) {
+//                    if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
+//                        let jsonKey = String(cString: keyCString)
+//                        result[jsonKey]._setIfNil(to: JSON(pointer: valuePtr))
+//                    }
+//                }
+//            case .convertFromSnakeCase:
+//                while let keyPtr = yyjson_obj_iter_next(&iter) {
+//                    if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
+//                        let jsonKey = String(cString: keyCString)
+//                        result[Self._convertFromSnakeCase(jsonKey)]._setIfNil(to: JSON(pointer: valuePtr))
+//                    }
+//                }
+//            case .custom(let converter):
+//                let codingPathForCustomConverter = codingPathNode.path
+//                
+//                while let keyPtr = yyjson_obj_iter_next(&iter) {
+//                    if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
+//                        let jsonKey = String(cString: keyCString)
+//                        var pathForKey = codingPathForCustomConverter
+//                        pathForKey.append(_CodingKey(stringValue: jsonKey)!)
+//                        result[converter(pathForKey).stringValue]._setIfNil(to: JSON(pointer: valuePtr))
+//                    }
+//                }
+//            @unknown default:
+//                while let keyPtr = yyjson_obj_iter_next(&iter) {
+//                    if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
+//                        let jsonKey = String(cString: keyCString)
+//                        result[jsonKey]._setIfNil(to: JSON(pointer: valuePtr))
+//                    }
+//                }
+//            }
+//            
+//            return result
+//        }()
+        
+        var keyValues: [String: JSON] = [:]
 
         init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) throws {
             self.impl = impl
             self.codingPathNode = codingPathNode
+            self.valuePointer = impl.topValue.pointer
+            
+            getKeyValues()
+        }
+        
+        private mutating func getKeyValues() {
+            var result: [String: JSON] = [:]
+            var iter = yyjson_obj_iter()
+            
+            guard yyjson_obj_iter_init(valuePointer, &iter) else {
+                return
+            }
+            result.reserveCapacity(Int(yyjson_obj_size(valuePointer)))
+            
+            switch impl.options.keyDecodingStrategy {
+            case .useDefaultKeys:
+                while let keyPtr = yyjson_obj_iter_next(&iter) {
+                    if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
+                        let jsonKey = String(cString: keyCString)
+                        result[jsonKey]._setIfNil(to: JSON(pointer: valuePtr))
+                    }
+                }
+            case .convertFromSnakeCase:
+                while let keyPtr = yyjson_obj_iter_next(&iter) {
+                    if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
+                        let jsonKey = String(cString: keyCString)
+                        result[Self._convertFromSnakeCase(jsonKey)]._setIfNil(to: JSON(pointer: valuePtr))
+                    }
+                }
+            case .custom(let converter):
+                let codingPathForCustomConverter = codingPathNode.path
+                
+                while let keyPtr = yyjson_obj_iter_next(&iter) {
+                    if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
+                        let jsonKey = String(cString: keyCString)
+                        var pathForKey = codingPathForCustomConverter
+                        pathForKey.append(_CodingKey(stringValue: jsonKey)!)
+                        result[converter(pathForKey).stringValue]._setIfNil(to: JSON(pointer: valuePtr))
+                    }
+                }
+            @unknown default:
+                while let keyPtr = yyjson_obj_iter_next(&iter) {
+                    if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
+                        let jsonKey = String(cString: keyCString)
+                        result[jsonKey]._setIfNil(to: JSON(pointer: valuePtr))
+                    }
+                }
+            }
+            
+            keyValues = result
         }
 
         public var codingPath : [CodingKey] {
@@ -470,23 +570,11 @@ extension JSONDecoderImpl {
         }
 
         var allKeys: [K] {
-            var keys: [K] = []
-            var iter = yyjson_obj_iter()
-            let topValuePtr = impl.topValue.pointer
-            guard yyjson_obj_iter_init(topValuePtr, &iter) else {
-                return []
-            }
-            keys.reserveCapacity(Int(yyjson_obj_size(topValuePtr)))
-            while let keyPtr = yyjson_obj_iter_next(&iter) {
-                if let keyCString = yyjson_get_str(keyPtr), let key = K(stringValue: String(cString: keyCString)) {
-                    keys.append(key)
-                }
-            }
-            return keys
+            return keyValues.keys.compactMap { K(stringValue: $0) }
         }
 
         func contains(_ key: K) -> Bool {
-            return yyjson_obj_get(impl.topValue.pointer, key.stringValue) != nil
+            return keyValues.keys.contains(key.stringValue)
         }
 
         func decodeNil(forKey key: K) throws -> Bool {
@@ -729,21 +817,135 @@ extension JSONDecoderImpl {
 
         @inline(__always)
         private func getValue(forKey key: some CodingKey) throws -> JSON {
-            guard let valuePtr = yyjson_obj_get(impl.topValue.pointer, key.stringValue) else {
+//            let ptr = impl.topValue.pointer
+            
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            top.pointer
+//            impl.topValue.pointer
+//            impl.topValue.pointer
+//            impl.topValue.pointer
+//            impl.topValue.pointer
+//            impl.topValue.pointer
+//            impl.topValue.pointer
+////            yyjson_obj_get(impl.topValue.pointer, "key.stringValue")
+////            yyjson_obj_get(impl.topValue.pointer, "key.stringValue")
+////            yyjson_obj_get(impl.topValue.pointer, "key.stringValue")
+////            yyjson_obj_get(impl.topValue.pointer, "key.stringValue")
+////            yyjson_obj_get(impl.topValue.pointer, "key.stringValue")
+////            let topValuePtr = impl.topValue.pointer
+//            var value: UnsafeMutablePointer<yyjson_val>?
+//            switch impl.options.keyDecodingStrategy {
+//            case .useDefaultKeys:
+//                // Direct mapping
+//                let keyString = key.stringValue
+////                value = yyjson_obj_get(topValuePtr, keyString) != nil ? keyString : nil
+//                value = yyjson_obj_get(impl.topValue.pointer, key.stringValue)
+//            case .convertFromSnakeCase:
+//                // First try the original key
+////                let originalKey = key.stringValue
+////                if yyjson_obj_get(topValuePtr, originalKey) != nil {
+////                    return originalKey
+////                }
+////                
+////                // Then try all JSON keys to find a match after conversion
+////                var iter = yyjson_obj_iter()
+////                guard yyjson_obj_iter_init(topValuePtr, &iter) else {
+////                    return nil
+////                }
+////                
+////                while let keyPtr = yyjson_obj_iter_next(&iter) {
+////                    if let keyCString = yyjson_get_str(keyPtr) {
+////                        let jsonKey = String(cString: keyCString)
+////                        let convertedKey = Self._convertFromSnakeCase(jsonKey)
+////                        if convertedKey == originalKey {
+////                            return jsonKey
+////                        }
+////                    }
+////                }
+////                return nil
+//                break
+//                
+//            case .custom(let converter):
+//                // First try the original key
+////                let originalKey = swiftKey.stringValue
+////                if yyjson_obj_get(topValuePtr, originalKey) != nil {
+////                    return originalKey
+////                }
+////                
+////                // Then try all JSON keys to find a match after conversion
+////                var iter = yyjson_obj_iter()
+////                guard yyjson_obj_iter_init(topValuePtr, &iter) else {
+////                    return nil
+////                }
+////                
+////                var pathForKey = codingPath
+////                pathForKey.append(swiftKey)
+////                
+////                while let keyPtr = yyjson_obj_iter_next(&iter) {
+////                    if let keyCString = yyjson_get_str(keyPtr) {
+////                        let jsonKey = String(cString: keyCString)
+////                        // Create a temporary coding key for conversion
+////                        guard let tempKey = _CodingKey(stringValue: jsonKey) else { continue }
+////                        var tempPath = codingPath
+////                        tempPath.append(tempKey)
+////                        let convertedKey = converter(tempPath)
+////                        if convertedKey.stringValue == originalKey {
+////                            return jsonKey
+////                        }
+////                    }
+////                }
+//                break
+//                
+//            @unknown default:
+//                break
+////                let keyString = swiftKey.stringValue
+////                return yyjson_obj_get(topValuePtr, keyString) != nil ? keyString : nil
+//            }
+//            let keyString = swiftKey.stringValue
+//            return yyjson_obj_get(topValuePtr, keyString) != nil ? keyString : nil
+            
+//            guard let valuePtr = value else {
+//            guard let valuePtr = yyjson_obj_get(ptr, key.stringValue) else {
+//            
+////            guard let jsonKey = impl.findJSONKey(for: key),
+////                  let valuePtr = yyjson_obj_get(impl.topValue.pointer, jsonKey) else {
+//                throw DecodingError.keyNotFound(key, .init(
+//                    codingPath: codingPath,
+//                    debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
+//                ))
+//            }
+//            return JSON(pointer: valuePtr)
+            guard let value = keyValues[key.stringValue] else {
                 throw DecodingError.keyNotFound(key, .init(
                     codingPath: codingPath,
                     debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
                 ))
             }
-            return JSON(pointer: valuePtr)
+            return value
         }
 
         @inline(__always)
         private func getValueIfPresent(forKey key: some CodingKey) -> JSON? {
-            guard let valuePtr = yyjson_obj_get(impl.topValue.pointer, key.stringValue) else {
-                return nil
-            }
-            return JSON(pointer: valuePtr)
+            return keyValues[key.stringValue]
+//            guard let jsonKey = impl.findJSONKey(for: key),
+//                  let valuePtr = yyjson_obj_get(impl.topValue.pointer, jsonKey) else {
+//                return nil
+//            }
+//            return JSON(pointer: valuePtr)
         }
 
         private func createTypeMismatchError(type: Any.Type, forKey key: K, value: JSON) -> DecodingError {
@@ -779,6 +981,51 @@ extension JSONDecoderImpl {
                 ))
             }
             return int
+        }
+        
+        private static func _convertFromSnakeCase(_ stringKey: String) -> String {
+            guard !stringKey.isEmpty else { return stringKey }
+
+            // Find the first non-underscore character
+            guard let firstNonUnderscore = stringKey.firstIndex(where: { $0 != "_" }) else {
+                // Reached the end without finding an _
+                return stringKey
+            }
+
+            // Find the last non-underscore character
+            var lastNonUnderscore = stringKey.index(before: stringKey.endIndex)
+            while lastNonUnderscore > firstNonUnderscore && stringKey[lastNonUnderscore] == "_" {
+                stringKey.formIndex(before: &lastNonUnderscore)
+            }
+
+            let keyRange = firstNonUnderscore...lastNonUnderscore
+            let leadingUnderscoreRange = stringKey.startIndex..<firstNonUnderscore
+            let trailingUnderscoreRange = stringKey.index(after: lastNonUnderscore)..<stringKey.endIndex
+
+            let components = stringKey[keyRange].split(separator: "_")
+            let joinedString: String
+            if components.count == 1 {
+                // No underscores in key, leave the word as is - maybe already camel cased
+                joinedString = String(stringKey[keyRange])
+            } else {
+                joinedString = ([components[0].lowercased()] + components[1...].map { $0.capitalized }).joined()
+            }
+
+            // Do a cheap isEmpty check before creating and appending potentially empty strings
+            let result: String
+            if (leadingUnderscoreRange.isEmpty && trailingUnderscoreRange.isEmpty) {
+                result = joinedString
+            } else if (!leadingUnderscoreRange.isEmpty && !trailingUnderscoreRange.isEmpty) {
+                // Both leading and trailing underscores
+                result = String(stringKey[leadingUnderscoreRange]) + joinedString + String(stringKey[trailingUnderscoreRange])
+            } else if (!leadingUnderscoreRange.isEmpty) {
+                // Just leading
+                result = String(stringKey[leadingUnderscoreRange]) + joinedString
+            } else {
+                // Just trailing
+                result = joinedString + String(stringKey[trailingUnderscoreRange])
+            }
+            return result
         }
     }
 }

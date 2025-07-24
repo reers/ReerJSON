@@ -480,6 +480,160 @@ final class ReerJSONTests: XCTestCase {
             XCTAssertTrue(result.isActive)
         }
         
+        // MARK: - KeyDecodingStrategy 测试
+        func testKeyDecodingStrategySnakeCase() throws {
+            let jsonString = """
+            {
+                "first_name": "John",
+                "last_name": "Doe",
+                "birth_date": "1990-01-01",
+                "is_active": true,
+                "user_id": 123,
+                "contact_info": {
+                    "phone_number": "555-1234",
+                    "email_address": "john@example.com"
+                }
+            }
+            """
+            
+            struct ContactInfo: Codable {
+                let phoneNumber: String
+                let emailAddress: String
+            }
+            
+            struct User: Codable {
+                let firstName: String
+                let lastName: String
+                let birthDate: String
+                let isActive: Bool
+                let userId: Int
+                let contactInfo: ContactInfo
+            }
+            
+            let decoder = ReerJSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            
+            let user = try decoder.decode(User.self, from: jsonString.data(using: .utf8)!)
+            
+            XCTAssertEqual(user.firstName, "John")
+            XCTAssertEqual(user.lastName, "Doe")
+            XCTAssertEqual(user.birthDate, "1990-01-01")
+            XCTAssertTrue(user.isActive)
+            XCTAssertEqual(user.userId, 123)
+            XCTAssertEqual(user.contactInfo.phoneNumber, "555-1234")
+            XCTAssertEqual(user.contactInfo.emailAddress, "john@example.com")
+        }
+        
+        func testKeyDecodingStrategyCustom() throws {
+            let jsonString = """
+            {
+                "USER_NAME": "Alice",
+                "USER_AGE": 30,
+                "IS_ADMIN": false
+            }
+            """
+            
+            struct User: Codable {
+                let userName: String
+                let userAge: Int
+                let isAdmin: Bool
+            }
+            
+            let decoder = ReerJSONDecoder()
+            decoder.keyDecodingStrategy = .custom { codingPath in
+                let key = codingPath.last!.stringValue
+                // 将大写键转换为驼峰形式
+                let components = key.lowercased().split(separator: "_")
+                if components.count > 1 {
+                    let camelCase = components.first! + components.dropFirst().map { $0.capitalized }.joined()
+                    return _CodingKey(stringValue: String(camelCase))!
+                }
+                return _CodingKey(stringValue: key.lowercased())!
+            }
+            
+            let user = try decoder.decode(User.self, from: jsonString.data(using: .utf8)!)
+            
+            XCTAssertEqual(user.userName, "Alice")
+            XCTAssertEqual(user.userAge, 30)
+            XCTAssertFalse(user.isAdmin)
+        }
+        
+        func testKeyDecodingStrategyUseDefaultKeys() throws {
+            let jsonString = """
+            {
+                "userName": "Bob",
+                "userAge": 25,
+                "isActive": true
+            }
+            """
+            
+            struct User: Codable {
+                let userName: String
+                let userAge: Int
+                let isActive: Bool
+            }
+            
+            let decoder = ReerJSONDecoder()
+            decoder.keyDecodingStrategy = .useDefaultKeys
+            
+            let user = try decoder.decode(User.self, from: jsonString.data(using: .utf8)!)
+            
+            XCTAssertEqual(user.userName, "Bob")
+            XCTAssertEqual(user.userAge, 25)
+            XCTAssertTrue(user.isActive)
+        }
+        
+        func testSnakeCaseConversionEdgeCases() throws {
+            let jsonString = """
+            {
+                "simple": "value1",
+                "_leading": "value2",
+                "trailing_": "value3",
+                "__double_leading": "value4",
+                "double_trailing__": "value5",
+                "multiple_under_scores": "value6",
+                "single": "value7",
+                "": "value8"
+            }
+            """
+            
+            struct TestStruct: Codable {
+                let simple: String
+                let leading: String
+                let trailing: String
+                let doubleLeading: String
+                let doubleTrailing: String
+                let multipleUnderScores: String
+                let single: String
+                let empty: String
+                
+                enum CodingKeys: String, CodingKey {
+                    case simple = "simple"
+                    case leading = "_leading"
+                    case trailing = "trailing_"
+                    case doubleLeading = "__double_leading"
+                    case doubleTrailing = "double_trailing__"
+                    case multipleUnderScores = "multiple_under_scores"
+                    case single = "single"
+                    case empty = ""
+                }
+            }
+            
+            let decoder = ReerJSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            
+            let result = try decoder.decode(TestStruct.self, from: jsonString.data(using: .utf8)!)
+            
+            XCTAssertEqual(result.simple, "value1")
+            XCTAssertEqual(result.leading, "value2")
+            XCTAssertEqual(result.trailing, "value3")
+            XCTAssertEqual(result.doubleLeading, "value4")
+            XCTAssertEqual(result.doubleTrailing, "value5")
+            XCTAssertEqual(result.multipleUnderScores, "value6")
+            XCTAssertEqual(result.single, "value7")
+            XCTAssertEqual(result.empty, "value8")
+        }
+        
         // MARK: - 枚举测试
         func testEnumDecoding() throws {
             let decoder = ReerJSONDecoder()

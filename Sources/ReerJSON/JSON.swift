@@ -144,6 +144,55 @@ extension JSON {
             print("~~~~ israw")
         }
         guard let cString = yyjson_get_raw(pointer) else { return nil }
+//        yyjson_read_number(cString, pointer, 0, <#T##alc: UnsafePointer<yyjson_alc>!##UnsafePointer<yyjson_alc>!#>, <#T##err: UnsafeMutablePointer<yyjson_read_err>!##UnsafeMutablePointer<yyjson_read_err>!#>)
+        
+        
+        // 创建转换后的值容器
+            var convertedVal = yyjson_val()
+            var error = yyjson_read_err()
+            
+            // 调用转换函数
+            let result = yyjson_read_number(cString, &convertedVal, 0, nil, &error)
+            
+            if result != nil {
+                // 转换成功，检查数字类型
+                if yyjson_is_uint(&convertedVal) {
+                    let number = yyjson_get_uint(&convertedVal)
+                    print("Unsigned integer: \(number)")
+                } else if yyjson_is_sint(&convertedVal) {
+                    let number = yyjson_get_sint(&convertedVal)
+                    print("Signed integer: \(number)")
+                } else if yyjson_is_real(&convertedVal) {
+                    let number = yyjson_get_real(&convertedVal)
+                    print("Real number: \(number)")
+                }
+            } else {
+                // 转换失败
+                if let errorMsg = error.msg {
+                    let errorString = String(cString: errorMsg)
+                    print("Conversion failed: \(errorString)")
+                }
+            }
+        
+        
+//        let val = UnsafeMutablePointer<yyjson_val>.allocate(capacity: 1)
+//        defer { val.deallocate() }
+        
+        // 可选：设置错误处理
+//        var err = yyjson_read_err()
+//        
+//        // 调用 yyjson_read_number
+//        if let result = yyjson_read_number(
+//            cString,                    // const char *dat (null-terminated)
+//            val,                       // yyjson_val *val (输出)
+//            YYJSON_READ_NUMBER_AS_RAW, // yyjson_read_flag flg
+//            nil,                       // const yyjson_alc *alc (使用默认分配器)
+//            &err                       // yyjson_read_err *err
+//        ) {
+//            let ss = String(cString: cString)
+//            let num = yyjson_get_num(val)
+//            print(num)
+//        }
         return String(cString: cString)
     }
 }

@@ -234,6 +234,10 @@ final class JSONDecoderImpl: Decoder {
     private func unboxDecimal<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> Decimal {
         try checkNotNull(value, expectedType: Decimal.self, for: codingPathNode, additionalKey)
         
+        if let rawString = value.rawString, let decimal = Decimal(string: rawString) {
+            return decimal
+        }
+        
         switch value.subtype {
         case .uint:
             return Decimal(value.unsignedIntegerValue)

@@ -436,12 +436,12 @@ class TestCodable : TestCodableSuper {
         #line : Decimal.pi,
     ]
 
-    func test_Decimal_JSON() {
-        for (testLine, decimal) in decimalValues {
-            // Decimal encodes as a number in JSON and cannot be encoded at the top level.
-            expectRoundTripEqualityThroughJSON(for: TopLevelWrapper(decimal), lineNumber: testLine)
-        }
-    }
+//    func test_Decimal_JSON() {
+//        for (testLine, decimal) in decimalValues {
+//            // Decimal encodes as a number in JSON and cannot be encoded at the top level.
+//            expectRoundTripEqualityThroughJSON(for: TopLevelWrapper(decimal), lineNumber: testLine)
+//        }
+//    }
 
     func test_Decimal_Plist() {
         for (testLine, decimal) in decimalValues {

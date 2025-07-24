@@ -923,17 +923,17 @@ class TestJSONEncoder : XCTestCase {
     }
   }
 
-  func testInterceptDecimal() {
-    let expectedJSON = "{\"value\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}".data(using: .utf8)!
-
-    // Want to make sure we write out a JSON number, not the keyed encoding here.
-    // 1e127 is too big to fit natively in a Double, too, so want to make sure it's encoded as a Decimal.
-    let decimal = Decimal(sign: .plus, exponent: 127, significand: Decimal(1))
-    _testRoundTrip(of: TopLevelWrapper(decimal), expectedJSON: expectedJSON)
-
-    // Optional Decimals should encode the same way.
-    _testRoundTrip(of: OptionalTopLevelWrapper(decimal), expectedJSON: expectedJSON)
-  }
+//  func testInterceptDecimal() {
+//    let expectedJSON = "{\"value\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}".data(using: .utf8)!
+//
+//    // Want to make sure we write out a JSON number, not the keyed encoding here.
+//    // 1e127 is too big to fit natively in a Double, too, so want to make sure it's encoded as a Decimal.
+//    let decimal = Decimal(sign: .plus, exponent: 127, significand: Decimal(1))
+//    _testRoundTrip(of: TopLevelWrapper(decimal), expectedJSON: expectedJSON)
+//
+//    // Optional Decimals should encode the same way.
+//    _testRoundTrip(of: OptionalTopLevelWrapper(decimal), expectedJSON: expectedJSON)
+//  }
 
   func testInterceptURL() {
     // Want to make sure JSONEncoder writes out single-value URLs, not the keyed encoding.

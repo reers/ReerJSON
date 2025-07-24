@@ -138,6 +138,14 @@ extension JSON {
         }
         return nil
     }
+    
+    var rawString: String? {
+        if yyjson_is_raw(pointer) {
+            print("~~~~ israw")
+        }
+        guard let cString = yyjson_get_raw(pointer) else { return nil }
+        return String(cString: cString)
+    }
 }
 
 extension JSON {

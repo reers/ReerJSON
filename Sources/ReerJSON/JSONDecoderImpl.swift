@@ -311,7 +311,7 @@ final class JSONDecoderImpl: Decoder {
         try checkNotNull(value, expectedType: String.self, for: codingPathNode, additionalKey)
         
         guard let string = value.string else {
-            throw createTypeMismatchError(type: String.self, for: codingPath, value: value)
+            throw createTypeMismatchError(type: String.self, for: codingPathNode.path(byAppending: additionalKey), value: value)
         }
         return string
     }
@@ -319,10 +319,15 @@ final class JSONDecoderImpl: Decoder {
     func unboxDouble<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> Double {
         try checkNotNull(value, expectedType: Double.self, for: codingPathNode, additionalKey)
         
-        return try unboxFloatingPoint(from: value, as: Double.self)
+        return try unboxFloatingPoint(from: value, as: Double.self, for: codingPathNode, additionalKey)
     }
     
-    func unboxFloatingPoint<F: BinaryFloatingPoint>(from value: JSON, as type: F.Type) throws -> F where F: LosslessStringConvertible {
+    func unboxFloatingPoint<F: BinaryFloatingPoint>(
+        from value: JSON,
+        as type: F.Type,
+        for codingPathNode: CodingPathNode,
+        _ additionalKey: (some CodingKey)? = nil
+    ) throws -> F where F: LosslessStringConvertible {
         if let doubleValue = value.double {
             
             guard doubleValue.isFinite else {
@@ -350,7 +355,7 @@ final class JSONDecoderImpl: Decoder {
             }
         }
         
-        throw self.createTypeMismatchError(type: F.self, for: codingPath, value: value)
+        throw self.createTypeMismatchError(type: F.self, for: codingPathNode.path(byAppending: additionalKey), value: value)
     }
 }
 
@@ -376,11 +381,11 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
 
     func decode(_: Double.Type) throws -> Double {
-        try unboxFloatingPoint(from: topValue, as: Double.self)
+        try unboxFloatingPoint(from: topValue, as: Double.self, for: codingPathNode, _CodingKey?.none)
     }
 
     func decode(_: Float.Type) throws -> Float {
-        try unboxFloatingPoint(from: topValue, as: Float.self)
+        try unboxFloatingPoint(from: topValue, as: Float.self, for: codingPathNode, _CodingKey?.none)
     }
 
     func decode(_: Int.Type) throws -> Int {
@@ -539,26 +544,26 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
 
     func decode(_: Double.Type, forKey key: K) throws -> Double {
         let jsonValue = try getValue(forKey: key)
-        return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self)
+        return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self, for: codingPathNode, key)
     }
 
     func decodeIfPresent(_: Double.Type, forKey key: K) throws -> Double? {
         guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self)
+        return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self, for: codingPathNode, key)
     }
 
     func decode(_: Float.Type, forKey key: K) throws -> Float {
         let jsonValue = try getValue(forKey: key)
-        return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self)
+        return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self, for: codingPathNode, key)
     }
 
     func decodeIfPresent(_ type: Float.Type, forKey key: K) throws -> Float? {
         guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self)
+        return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self, for: codingPathNode, key)
     }
     
     func decode(_: Int.Type, forKey key: K) throws -> Int {
@@ -908,26 +913,26 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
 
     func decode(_: Double.Type, forKey key: K) throws -> Double {
         let jsonValue = try getValue(forKey: key)
-        return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self)
+        return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self, for: codingPathNode, key)
     }
 
     func decodeIfPresent(_: Double.Type, forKey key: K) throws -> Double? {
         guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self)
+        return try impl.unboxFloatingPoint(from: jsonValue, as: Double.self, for: codingPathNode, key)
     }
 
     func decode(_: Float.Type, forKey key: K) throws -> Float {
         let jsonValue = try getValue(forKey: key)
-        return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self)
+        return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self, for: codingPathNode, key)
     }
 
     func decodeIfPresent(_ type: Float.Type, forKey key: K) throws -> Float? {
         guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self)
+        return try impl.unboxFloatingPoint(from: jsonValue, as: Float.self, for: codingPathNode, key)
     }
     
     func decode(_: Int.Type, forKey key: K) throws -> Int {
@@ -1342,7 +1347,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
 
     mutating func decode(_: Double.Type) throws -> Double {
         let value = try peekNextValue(ofType: Double.self)
-        let result = try impl.unboxFloatingPoint(from: value, as: Double.self)
+        let result = try impl.unboxFloatingPoint(from: value, as: Double.self, for: codingPathNode, _CodingKey(index: currentIndex))
         advanceToNextValue()
         return result
     }
@@ -1352,14 +1357,14 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
             advanceToNextValue()
             return nil
         }
-        let result = try impl.unboxFloatingPoint(from: value, as: Double.self)
+        let result = try impl.unboxFloatingPoint(from: value, as: Double.self, for: codingPathNode, _CodingKey(index: currentIndex))
         advanceToNextValue()
         return result
     }
 
     mutating func decode(_: Float.Type) throws -> Float {
         let value = try peekNextValue(ofType: Float.self)
-        let result = try impl.unboxFloatingPoint(from: value, as: Float.self)
+        let result = try impl.unboxFloatingPoint(from: value, as: Float.self, for: codingPathNode, _CodingKey(index: currentIndex))
         advanceToNextValue()
         return result
     }
@@ -1369,7 +1374,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
             advanceToNextValue()
             return nil
         }
-        let result = try impl.unboxFloatingPoint(from: value, as: Float.self)
+        let result = try impl.unboxFloatingPoint(from: value, as: Float.self, for: codingPathNode, _CodingKey(index: currentIndex))
         advanceToNextValue()
         return result
     }

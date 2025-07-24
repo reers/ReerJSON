@@ -66,7 +66,20 @@ let package = Package(
         ),
         .testTarget(
             name: "ReerJSONTests",
-            dependencies: ["ReerJSON"]
-        ),
+            dependencies: ["ReerJSON"],
+            resources: [
+                .copy("Models/apache_builds.json"),
+                .copy("Models/canada.json"),
+                .copy("Models/entities.json"),
+                .copy("Models/github_events.json"),
+                .copy("Models/marine_ik.json"),
+                .copy("Models/mesh.json"),
+                .copy("Models/numbers.json"),
+                .copy("Models/random.json"),
+                .copy("Models/twitter.json"),
+                .copy("Models/twitter2.json"),
+                .copy("Models/twitterescaped.json")
+            ]
+        )
     ]
 )

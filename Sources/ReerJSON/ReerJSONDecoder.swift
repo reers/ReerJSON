@@ -151,7 +151,7 @@ open class ReerJSONDecoder {
             yyjson_read($0.bindMemory(to: CChar.self).baseAddress, data.count, 0)
         }
         guard let doc else {
-            return try decode(type, from: data)
+            return try decodeWithFoundationDecoder(type, from: data)
         }
         
         defer {
@@ -163,7 +163,7 @@ open class ReerJSONDecoder {
         return try impl.unbox(json, as: type, for: .root, _CodingKey?.none)
     }
     
-    func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data, reason: String?) throws -> T {
+    func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data) throws -> T {
         let decoder = Foundation.JSONDecoder()
         decoder.dataDecodingStrategy = dataDecodingStrategy
         decoder.dateDecodingStrategy = dateDecodingStrategy

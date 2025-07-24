@@ -1266,7 +1266,6 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
         }
         
         let nextValue = JSON(pointer: elementPtr)
-        if nextValue.isNull { return nil }
         peekedValue = nextValue
         return nextValue
     }

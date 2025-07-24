@@ -169,7 +169,7 @@ final class JSONDecoderImpl: Decoder {
             let string = try unboxString(from: value, for: codingPathNode, additionalKey)
             guard let date = _iso8601Formatter.date(from: string) else {
                 throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
+                    codingPath: codingPathNode.path(byAppending: additionalKey),
                     debugDescription: "Expected date string to be ISO8601-formatted."
                 ))
             }
@@ -178,7 +178,7 @@ final class JSONDecoderImpl: Decoder {
             let string = try unboxString(from: value, for: codingPathNode, additionalKey)
             guard let date = formatter.date(from: string) else {
                 throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
+                    codingPath: codingPathNode.path(byAppending: additionalKey),
                     debugDescription: "Date string does not match format expected by formatter."
                 ))
             }
@@ -204,7 +204,7 @@ final class JSONDecoderImpl: Decoder {
             let string = try unboxString(from: value, for: codingPathNode, additionalKey)
             guard let data = Data(base64Encoded: string) else {
                 throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
+                    codingPath: codingPathNode.path(byAppending: additionalKey),
                     debugDescription: "Encountered Data is not valid Base64."
                 ))
             }
@@ -224,7 +224,7 @@ final class JSONDecoderImpl: Decoder {
         let string = try unboxString(from: value, for: codingPathNode, additionalKey)
         guard let url = URL(string: string) else {
             throw DecodingError.dataCorrupted(.init(
-                codingPath: codingPath,
+                codingPath: codingPathNode.path(byAppending: additionalKey),
                 debugDescription: "Invalid URL string."
             ))
         }
@@ -243,7 +243,7 @@ final class JSONDecoderImpl: Decoder {
             let doubleValue = value.realValue
             guard doubleValue.isFinite else {
                 throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
+                    codingPath: codingPathNode.path(byAppending: additionalKey),
                     debugDescription: "Cannot convert non-finite floating point \(doubleValue) to Decimal."
                 ))
             }
@@ -262,7 +262,7 @@ final class JSONDecoderImpl: Decoder {
         
         guard value.isObject else {
             throw DecodingError.typeMismatch([String: Any].self, .init(
-                codingPath: codingPath,
+                codingPath: codingPathNode.path(byAppending: additionalKey),
                 debugDescription: "Expected to decode \([String: Any].self) but found \(value.debugDataTypeDescription) instead."
             ))
         }
@@ -275,7 +275,7 @@ final class JSONDecoderImpl: Decoder {
         var iter = yyjson_obj_iter()
         guard yyjson_obj_iter_init(value.pointer, &iter) else {
             throw DecodingError.dataCorrupted(.init(
-                codingPath: codingPath,
+                codingPath: codingPathNode.path(byAppending: additionalKey),
                 debugDescription: "Failed to initialize object iterator."
             ))
         }
@@ -286,7 +286,7 @@ final class JSONDecoderImpl: Decoder {
         while let keyPtr = yyjson_obj_iter_next(&iter) {
             guard let keyCString = yyjson_get_str(keyPtr) else {
                 throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
+                    codingPath: codingPathNode.path(byAppending: additionalKey),
                     debugDescription: "Object key is not a valid string."
                 ))
             }
@@ -294,7 +294,7 @@ final class JSONDecoderImpl: Decoder {
             
             guard let valuePtr = yyjson_obj_iter_get_val(keyPtr) else {
                 throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
+                    codingPath: codingPathNode.path(byAppending: additionalKey),
                     debugDescription: "Failed to get value for key '\(key)'."
                 ))
             }
@@ -332,12 +332,7 @@ final class JSONDecoderImpl: Decoder {
                 ))
             }
 
-            guard let floatValue = F(exactly: doubleValue) else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "The JSON number \(doubleValue) cannot be represented as a \(F.self) without loss of precision."
-                ))
-            }
+            let floatValue = F(doubleValue)
             return floatValue
         }
 

@@ -97,14 +97,14 @@ func averageTime(_ closure: () -> ()) -> CFTimeInterval {
     return times.dropFirst(count / 3).reduce(0, +) / CFTimeInterval(times.count)
 }
 
-func testPerf<T: Decodable>(appleDecoder: JSONDecoder, zippyDecoder: ReerJSONDecoder, json: Data, type: T.Type) {
-    let zippyTime = averageTime {
-        let _ = try! zippyDecoder.decode(type, from: json)
+func testPerf<T: Decodable>(appleDecoder: JSONDecoder, reerDecoder: ReerJSONDecoder, json: Data, type: T.Type) {
+    let reerTime = averageTime {
+        let _ = try! reerDecoder.decode(type, from: json)
     }
     let appleTime = averageTime {
         let _ = try! appleDecoder.decode(type, from: json)
     }
-    XCTAssert(zippyTime < appleTime / 3)
+    XCTAssert(reerTime < appleTime / 3)
 }
 
 public func testRoundTrip<T>(of value: T.Type,
@@ -137,7 +137,7 @@ public func testRoundTrip<T>(of value: T.Type,
         
         XCTAssertEqual(decoded, apple)
         if decoded == apple && testPerformance {
-            testPerf(appleDecoder: d, zippyDecoder: decoder, json: json.data(using: .utf8)!, type: T.self)
+            testPerf(appleDecoder: d, reerDecoder: decoder, json: json.data(using: .utf8)!, type: T.self)
         }
     } catch {
         XCTFail("Failed to decode \(T.self) from JSON: \(error)")
@@ -633,14 +633,14 @@ class ReerJSONTests: XCTestCase {
         decoder.dataDecodingStrategy = dataDecodingStrategy
         decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
         decoder.keyDecodingStrategy = keyDecodingStrategy
-        var zippyErrorMaybe: DecodingError?
+        var reerErrorMaybe: DecodingError?
         do {
             let _ = try decoder.decode(T.self, from: json.data(using: .utf8)!)
             XCTFail()
         } catch {
-            zippyErrorMaybe = error as? DecodingError
+            reerErrorMaybe = error as? DecodingError
         }
-        guard let zippyError = zippyErrorMaybe else {
+        guard let reerError = reerErrorMaybe else {
             XCTFail()
             return
         }
@@ -657,7 +657,7 @@ class ReerJSONTests: XCTestCase {
                 return
             }
             if !relaxedErrorCheck {
-                XCTAssertEqual(appleError, zippyError)
+                XCTAssertEqual(appleError, reerError)
             }
             return
         }

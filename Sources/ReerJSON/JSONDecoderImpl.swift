@@ -510,10 +510,9 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
     }
 
     func decodeIfPresent(_ type: Bool.Type, forKey key: K) throws -> Bool? {
-        guard let jsonValue = getValueIfPresent(forKey: key) else {
+        guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        if jsonValue.isNull { return nil }
         guard let bool = jsonValue.bool else {
             throw createTypeMismatchError(type: Bool.self, forKey: key, value: jsonValue)
         }
@@ -529,10 +528,9 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
     }
 
     func decodeIfPresent(_ type: String.Type, forKey key: K) throws -> String? {
-        guard let jsonValue = getValueIfPresent(forKey: key) else {
+        guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        if jsonValue.isNull { return nil }
         guard let string = jsonValue.string else {
             throw createTypeMismatchError(type: String.self, forKey: key, value: jsonValue)
         }
@@ -881,10 +879,9 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
     }
 
     func decodeIfPresent(_ type: Bool.Type, forKey key: K) throws -> Bool? {
-        guard let jsonValue = getValueIfPresent(forKey: key) else {
+        guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        if jsonValue.isNull { return nil }
         guard let bool = jsonValue.bool else {
             throw createTypeMismatchError(type: Bool.self, forKey: key, value: jsonValue)
         }
@@ -900,10 +897,9 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
     }
 
     func decodeIfPresent(_ type: String.Type, forKey key: K) throws -> String? {
-        guard let jsonValue = getValueIfPresent(forKey: key) else {
+        guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        if jsonValue.isNull { return nil }
         guard let string = jsonValue.string else {
             throw createTypeMismatchError(type: String.self, forKey: key, value: jsonValue)
         }
@@ -1310,7 +1306,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_ type: Bool.Type) throws -> Bool? {
-        guard let value = peekNextValueIfPresent(ofType: Bool.self) else {
+        guard let value = peekNextValueIfPresent(ofType: Bool.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1332,7 +1328,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_ type: String.Type) throws -> String? {
-        guard let value = peekNextValueIfPresent(ofType: String.self) else {
+        guard let value = peekNextValueIfPresent(ofType: String.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1385,7 +1381,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: Int.Type) throws -> Int? {
-        guard let value = peekNextValueIfPresent(ofType: Int.self) else {
+        guard let value = peekNextValueIfPresent(ofType: Int.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1398,7 +1394,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: Int8.Type) throws -> Int8? {
-        guard let value = peekNextValueIfPresent(ofType: Int8.self) else {
+        guard let value = peekNextValueIfPresent(ofType: Int8.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1411,7 +1407,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: Int16.Type) throws -> Int16? {
-        guard let value = peekNextValueIfPresent(ofType: Int16.self) else {
+        guard let value = peekNextValueIfPresent(ofType: Int16.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1424,7 +1420,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: Int32.Type) throws -> Int32? {
-        guard let value = peekNextValueIfPresent(ofType: Int32.self) else {
+        guard let value = peekNextValueIfPresent(ofType: Int32.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1443,7 +1439,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: Int64.Type) throws -> Int64? {
-        guard let value = peekNextValueIfPresent(ofType: Int64.self) else {
+        guard let value = peekNextValueIfPresent(ofType: Int64.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1456,7 +1452,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: UInt.Type) throws -> UInt? {
-        guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+        guard let value = peekNextValueIfPresent(ofType: UInt.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1469,7 +1465,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: UInt8.Type) throws -> UInt8? {
-        guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+        guard let value = peekNextValueIfPresent(ofType: UInt.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1482,7 +1478,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: UInt16.Type) throws -> UInt16? {
-        guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+        guard let value = peekNextValueIfPresent(ofType: UInt.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1495,7 +1491,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: UInt32.Type) throws -> UInt32? {
-        guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+        guard let value = peekNextValueIfPresent(ofType: UInt.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1514,7 +1510,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent(_: UInt64.Type) throws -> UInt64? {
-        guard let value = peekNextValueIfPresent(ofType: UInt.self) else {
+        guard let value = peekNextValueIfPresent(ofType: UInt.self), !value.isNull else {
             advanceToNextValue()
             return nil
         }
@@ -1529,11 +1525,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     }
 
     mutating func decodeIfPresent<T: Decodable>(_ type: T.Type) throws -> T? {
-        guard let value = self.peekNextValueIfPresent(ofType: type) else {
-            advanceToNextValue()
-            return nil
-        }
-        if value.isNull {
+        guard let value = self.peekNextValueIfPresent(ofType: type), !value.isNull else {
             advanceToNextValue()
             return nil
         }

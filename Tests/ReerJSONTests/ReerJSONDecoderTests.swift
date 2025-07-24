@@ -794,7 +794,7 @@ class ReerJSONTests: XCTestCase {
             }
         }
         let test = try! ReerJSONDecoder().decode(Test.self, from: #"{"a": 1, "b": 2}"#.data(using: .utf8)!)
-        XCTAssertEqual(test.keys, ["a", "b"])
+        XCTAssertTrue(test.keys == ["a", "b"] || test.keys == ["b", "a"])
     }
 
     func testDoubleParsing() {

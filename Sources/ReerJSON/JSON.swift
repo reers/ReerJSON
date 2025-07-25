@@ -18,21 +18,6 @@ enum YYJSONType: UInt8 {
     case object = 7
 }
 
-struct YYJSONSubtype: RawRepresentable, Equatable {
-    let rawValue: UInt8
-    
-    init(rawValue: UInt8) {
-        self.rawValue = rawValue
-    }
-    static let none = YYJSONSubtype(rawValue: 0 << 3)
-    static let `false` = YYJSONSubtype(rawValue: 0 << 3)
-    static let `true` = YYJSONSubtype(rawValue: 1 << 3)
-    static let uint = YYJSONSubtype(rawValue: 0 << 3)
-    static let sint = YYJSONSubtype(rawValue: 1 << 3)
-    static let real = YYJSONSubtype(rawValue: 2 << 3)
-    static let noesc = YYJSONSubtype(rawValue: 1 << 3)
-}
-
 struct JSON {
     let pointer: UnsafeMutablePointer<yyjson_val>?
     
@@ -55,11 +40,6 @@ extension JSON {
     var type: YYJSONType {
         return YYJSONType(rawValue: yyjson_get_type(pointer)) ?? .none
     }
-    
-    @inline(__always)
-    var subtype: YYJSONSubtype {
-        return YYJSONSubtype(rawValue: yyjson_get_subtype(pointer))
-    }
 }
 
 extension JSON {
@@ -81,20 +61,7 @@ extension JSON {
     }
     
     @inline(__always)
-    var double: Double? {
-        guard let cString = yyjson_get_raw(pointer) else { return nil }
-        var convertedVal = yyjson_val()
-        var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error),
-              yyjson_is_real(&convertedVal) else {
-            return nil
-        }
-        return yyjson_get_real(&convertedVal)
-    }
-    
-    @inline(__always)
     var isNumber: Bool {
-//        return yyjson_is_num(pointer)
         guard let cString = yyjson_get_raw(pointer) else { return false }
         var convertedVal = yyjson_val()
         var error = yyjson_read_err()
@@ -129,139 +96,30 @@ extension JSON {
     }
     
     @inline(__always)
-    var isSignedInteger: Bool {
-//        return yyjson_is_sint(pointer)
-        guard let cString = yyjson_get_raw(pointer) else { return false }
-        var convertedVal = yyjson_val()
-        var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error) else {
-            return false
-        }
-        return yyjson_is_sint(&convertedVal)
-    }
-    
-    @inline(__always)
-    var signedIntegerValue: Int64 {
-//        return yyjson_get_sint(pointer)
-        guard let cString = yyjson_get_raw(pointer) else { return 0 }
-        var convertedVal = yyjson_val()
-        var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error) else {
-            return 0
-        }
-        return yyjson_get_sint(&convertedVal)
-    }
-    
-    @inline(__always)
-    var isUnsignedInteger: Bool {
-//        return yyjson_is_uint(pointer)
-        guard let cString = yyjson_get_raw(pointer) else { return false }
-        var convertedVal = yyjson_val()
-        var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error) else {
-            return false
-        }
-        return yyjson_is_uint(&convertedVal)
-    }
-    
-    @inline(__always)
-    var unsignedIntegerValue: UInt64 {
-//        return yyjson_get_uint(pointer)
-        guard let cString = yyjson_get_raw(pointer) else { return 0 }
-        var convertedVal = yyjson_val()
-        var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error) else {
-            return 0
-        }
-        return yyjson_get_uint(&convertedVal)
-    }
-    
-    @inline(__always)
-    var realValue: Double {
-//        return yyjson_get_real(pointer)
-        guard let cString = yyjson_get_raw(pointer) else { return 0 }
-        var convertedVal = yyjson_val()
-        var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error),
-              yyjson_is_real(&convertedVal) else {
-            return 0
-        }
-        return unsafe_yyjson_get_real(&convertedVal)
-    }
-    
-    @inline(__always)
     var isObject: Bool {
         return yyjson_is_obj(pointer)
     }
     
     @inline(__always)
     func integer<T: FixedWidthInteger>() -> T? {
-        if isUnsignedInteger {
-            return T(exactly: unsignedIntegerValue)
+        guard let cString = yyjson_get_raw(pointer) else { return nil }
+        var convertedVal = yyjson_val()
+        var error = yyjson_read_err()
+        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error) else {
+            return nil
         }
-        if isSignedInteger {
-            return T(exactly: signedIntegerValue)
-        }
-        if let double = double {
-            return T(exactly: double)
+        if yyjson_is_uint(&convertedVal) {
+            return T(exactly: yyjson_get_uint(&convertedVal))
+        } else if yyjson_is_sint(&convertedVal) {
+            return T(exactly: yyjson_get_sint(&convertedVal))
+        } else if yyjson_is_real(&convertedVal) {
+            return T(exactly: unsafe_yyjson_get_real(&convertedVal))
         }
         return nil
     }
     
     var rawString: String? {
-//        if yyjson_is_raw(pointer) {
-//            print("~~~~ israw")
-//        }
         guard let cString = yyjson_get_raw(pointer) else { return nil }
-//        yyjson_read_number(cString, pointer, 0, <#T##alc: UnsafePointer<yyjson_alc>!##UnsafePointer<yyjson_alc>!#>, <#T##err: UnsafeMutablePointer<yyjson_read_err>!##UnsafeMutablePointer<yyjson_read_err>!#>)
-        
-        
-        // 创建转换后的值容器
-//            var convertedVal = yyjson_val()
-//            var error = yyjson_read_err()
-//            
-//            // 调用转换函数
-//            let result = yyjson_read_number(cString, &convertedVal, 0, nil, &error)
-//            
-//            if result != nil {
-//                // 转换成功，检查数字类型
-//                if yyjson_is_uint(&convertedVal) {
-//                    let number = yyjson_get_uint(&convertedVal)
-//                    print("Unsigned integer: \(number)")
-//                } else if yyjson_is_sint(&convertedVal) {
-//                    let number = yyjson_get_sint(&convertedVal)
-//                    print("Signed integer: \(number)")
-//                } else if yyjson_is_real(&convertedVal) {
-//                    let number = yyjson_get_real(&convertedVal)
-//                    print("Real number: \(number)")
-//                }
-//            } else {
-//                // 转换失败
-//                if let errorMsg = error.msg {
-//                    let errorString = String(cString: errorMsg)
-//                    print("Conversion failed: \(errorString)")
-//                }
-//            }
-        
-        
-//        let val = UnsafeMutablePointer<yyjson_val>.allocate(capacity: 1)
-//        defer { val.deallocate() }
-        
-        // 可选：设置错误处理
-//        var err = yyjson_read_err()
-//        
-//        // 调用 yyjson_read_number
-//        if let result = yyjson_read_number(
-//            cString,                    // const char *dat (null-terminated)
-//            val,                       // yyjson_val *val (输出)
-//            YYJSON_READ_NUMBER_AS_RAW, // yyjson_read_flag flg
-//            nil,                       // const yyjson_alc *alc (使用默认分配器)
-//            &err                       // yyjson_read_err *err
-//        ) {
-//            let ss = String(cString: cString)
-//            let num = yyjson_get_num(val)
-//            print(num)
-//        }
         return String(cString: cString)
     }
 }

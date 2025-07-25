@@ -635,7 +635,7 @@ class ReerJSONTests: XCTestCase {
         decoder.keyDecodingStrategy = keyDecodingStrategy
         var reerErrorMaybe: DecodingError?
         do {
-            let a = try decoder.decode(T.self, from: json.data(using: .utf8)!)
+            let _ = try decoder.decode(T.self, from: json.data(using: .utf8)!)
             XCTFail()
         } catch {
             reerErrorMaybe = error as? DecodingError

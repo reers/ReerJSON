@@ -753,6 +753,17 @@ class ReerJSONTests: XCTestCase {
     }
 
     func testInts() {
+        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *) {
+            testRoundTrip(of: Int128.self, json: "\(Int128.max)")
+            testRoundTrip(of: UInt128.self, json: "\(UInt128.max)")
+            _testFailure(of: Int128.self, json: "\(UInt128.max)")
+            testRoundTrip(of: [Int128].self, json: "[\(Int128.max)]")
+            testRoundTrip(of: [Int128].self, json: "[\(Int128.min)]")
+            testRoundTrip(of: [UInt128].self, json: "[\(UInt128.max)]")
+        }
+        testRoundTrip(of: UInt64.self, json: "\(UInt64.max)")
+        _testFailure(of: Int64.self, json: "\(UInt64.max)")
+        
         testRoundTrip(of: Int64.self, json: "\(Int64.max)")
         testRoundTrip(of: UInt64.self, json: "\(UInt64.max)")
         _testFailure(of: Int64.self, json: "\(UInt64.max)")

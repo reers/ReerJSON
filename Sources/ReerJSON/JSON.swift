@@ -113,7 +113,10 @@ extension JSON {
         } else if yyjson_is_sint(&convertedVal) {
             return T(exactly: yyjson_get_sint(&convertedVal))
         } else if yyjson_is_real(&convertedVal) {
-            return T(exactly: unsafe_yyjson_get_real(&convertedVal))
+            let real = unsafe_yyjson_get_real(&convertedVal)
+            if let value = T(exactly: real) { return value }
+            // try Int128/UInt128
+            return T(String(cString: cString))
         }
         return nil
     }

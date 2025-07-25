@@ -1,6 +1,5 @@
 import Foundation
 import yyjson
-import JJLISO8601DateFormatter
 
 // MARK: - JSONDecoderImpl
 
@@ -287,7 +286,7 @@ final class JSONDecoderImpl: Decoder {
             let elementValue = JSON(pointer: valuePtr)
             
             let decodedValue = try unbox(elementValue, as: valueType, for: dictCodingPathNode, _CodingKey(stringValue: key))
-            result[key] = decodedValue
+            result[key]._setIfNil(to: decodedValue)
         }
         
         return result as! T

@@ -10,9 +10,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if os(Linux)
+import Foundation
+#else
 import JJLISO8601DateFormatter
+#endif
 
-enum CodingPathNode : Sendable {
+enum CodingPathNode: Sendable {
     case root
     indirect case node(CodingKey, CodingPathNode, depth: Int)
     indirect case indexNode(Int, CodingPathNode, depth: Int)
@@ -115,12 +119,6 @@ enum _CodingKey : CodingKey {
     internal static let `super` = _CodingKey.string("super")
 }
 
-let _iso8601Formatter: JJLISO8601DateFormatter = {
-    let formatter = JJLISO8601DateFormatter()
-    formatter.formatOptions = .withInternetDateTime
-    return formatter
-}()
-
 protocol StringDecodableDictionary {
     static var elementType: Decodable.Type { get }
 }
@@ -136,3 +134,17 @@ extension Optional {
         self = value
     }
 }
+
+#if os(Linux)
+let _iso8601Formatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = .withInternetDateTime
+    return formatter
+}()
+#else
+let _iso8601Formatter: JJLISO8601DateFormatter = {
+    let formatter = JJLISO8601DateFormatter()
+    formatter.formatOptions = .withInternetDateTime
+    return formatter
+}()
+#endif

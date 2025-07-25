@@ -125,7 +125,7 @@ extension JSON {
 }
 
 extension JSON {
-    var debugDataTypeDescription : String {
+    var debugDataTypeDescription: String {
         switch type {
         case .string: return "a string"
         case .number: return "number"

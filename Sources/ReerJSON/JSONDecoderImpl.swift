@@ -234,27 +234,32 @@ final class JSONDecoderImpl: Decoder {
     private func unboxDecimal<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> Decimal {
         try checkNotNull(value, expectedType: Decimal.self, for: codingPathNode, additionalKey)
         
-        if let rawString = value.rawString, let decimal = Decimal(string: rawString) {
-            return decimal
+//        if let rawString = value.rawString, let decimal = Decimal(string: rawString) {
+//            return decimal
+//        }
+//        throw createTypeMismatchError(type: Decimal.self, for: codingPath, value: topValue)
+        guard let rawString = value.rawString, let decimal = Decimal(string: rawString) else {
+            throw createTypeMismatchError(type: Decimal.self, for: codingPathNode.path(byAppending: additionalKey), value: value)
         }
+        return decimal
         
-        switch value.subtype {
-        case .uint:
-            return Decimal(value.unsignedIntegerValue)
-        case .sint:
-            return Decimal(value.signedIntegerValue)
-        case .real:
-            let doubleValue = value.realValue
-            guard doubleValue.isFinite else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPathNode.path(byAppending: additionalKey),
-                    debugDescription: "Cannot convert non-finite floating point \(doubleValue) to Decimal."
-                ))
-            }
-            return Decimal(doubleValue)
-        default:
-            throw createTypeMismatchError(type: Decimal.self, for: codingPath, value: topValue)
-        }
+//        switch value.subtype {
+//        case .uint:
+//            return Decimal(value.unsignedIntegerValue)
+//        case .sint:
+//            return Decimal(value.signedIntegerValue)
+//        case .real:
+//            let doubleValue = value.realValue
+//            guard doubleValue.isFinite else {
+//                throw DecodingError.dataCorrupted(.init(
+//                    codingPath: codingPathNode.path(byAppending: additionalKey),
+//                    debugDescription: "Cannot convert non-finite floating point \(doubleValue) to Decimal."
+//                ))
+//            }
+//            return Decimal(doubleValue)
+//        default:
+//            throw createTypeMismatchError(type: Decimal.self, for: codingPath, value: topValue)
+//        }
     }
     
     private func unboxDictionary<T: Decodable, K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> T {
@@ -332,16 +337,16 @@ final class JSONDecoderImpl: Decoder {
         for codingPathNode: CodingPathNode,
         _ additionalKey: (some CodingKey)? = nil
     ) throws -> F where F: LosslessStringConvertible {
-        if let doubleValue = value.double {
+        if let numberValue = value.number {
             
-            guard doubleValue.isFinite else {
+            guard numberValue.isFinite else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
                     debugDescription: "Number \(value.debugDataTypeDescription) is not representable in Swift."
                 ))
             }
 
-            let floatValue = F(doubleValue)
+            let floatValue = F(numberValue)
             return floatValue
         }
 

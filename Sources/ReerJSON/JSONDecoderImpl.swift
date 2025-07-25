@@ -393,10 +393,12 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
         try decodeInteger()
     }
   
+    #if !os(Linux)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: Int128.Type) throws -> Int128 {
         try decodeInteger()
     }
+    #endif
 
     func decode(_: UInt.Type) throws -> UInt {
         try decodeInteger()
@@ -418,10 +420,12 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
         try decodeInteger()
     }
     
+    #if !os(Linux)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: UInt128.Type) throws -> UInt128 {
         try decodeInteger()
     }
+    #endif
 
     func decode<T: Decodable>(_ type: T.Type) throws -> T {
         return try unbox(topValue, as: type, for: codingPathNode, _CodingKey?.none)
@@ -603,13 +607,15 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
         let jsonValue = try getValue(forKey: key)
         return try decodeInteger(jsonValue, forKey: key)
     }
-  
+    
+    #if !os(Linux)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: Int128.Type, forKey key: K) throws -> Int128 {
         let jsonValue = try getValue(forKey: key)
         return try decodeInteger(jsonValue, forKey: key)
     }
-
+    #endif
+    
     func decodeIfPresent(_: Int64.Type, forKey key: K) throws -> Int64? {
         guard let jsonValue = getValueIfPresent(forKey: key) else {
             return nil
@@ -670,11 +676,13 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
         return try decodeInteger(jsonValue, forKey: key)
     }
   
+    #if !os(Linux)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: UInt128.Type, forKey key: K) throws -> UInt128 {
         let jsonValue = try getValue(forKey: key)
         return try decodeInteger(jsonValue, forKey: key)
     }
+    #endif
 
     func decodeIfPresent(_: UInt64.Type, forKey key: K) throws -> UInt64? {
         guard let jsonValue = getValueIfPresent(forKey: key) else {
@@ -973,11 +981,13 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
         return try decodeInteger(jsonValue, forKey: key)
     }
   
+    #if !os(Linux)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: Int128.Type, forKey key: K) throws -> Int128 {
         let jsonValue = try getValue(forKey: key)
         return try decodeInteger(jsonValue, forKey: key)
     }
+    #endif
 
     func decodeIfPresent(_: Int64.Type, forKey key: K) throws -> Int64? {
         guard let jsonValue = getValueIfPresent(forKey: key) else {
@@ -1039,11 +1049,13 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
         return try decodeInteger(jsonValue, forKey: key)
     }
   
+    #if !os(Linux)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: UInt128.Type, forKey key: K) throws -> UInt128 {
         let jsonValue = try getValue(forKey: key)
         return try decodeInteger(jsonValue, forKey: key)
     }
+    #endif
 
     func decodeIfPresent(_: UInt64.Type, forKey key: K) throws -> UInt64? {
         guard let jsonValue = getValueIfPresent(forKey: key) else {
@@ -1422,11 +1434,13 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
         return try decodeInteger(value)
     }
   
+    #if !os(Linux)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func decode(_: Int128.Type) throws -> Int128 {
         let value = try peekNextValue(ofType: Int128.self)
         return try decodeInteger(value)
     }
+    #endif
 
     mutating func decodeIfPresent(_: Int64.Type) throws -> Int64? {
         guard let value = peekNextValueIfPresent(ofType: Int64.self), !value.isNull else {
@@ -1493,11 +1507,13 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
         return try decodeInteger(value)
     }
   
+    #if !os(Linux)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func decode(_: UInt128.Type) throws -> UInt128 {
         let value = try peekNextValue(ofType: UInt.self)
         return try decodeInteger(value)
     }
+    #endif
 
     mutating func decodeIfPresent(_: UInt64.Type) throws -> UInt64? {
         guard let value = peekNextValueIfPresent(ofType: UInt.self), !value.isNull else {

@@ -403,15 +403,15 @@ final class JSONTests: XCTestCase {
 
         decoder.dataDecodingStrategy = .deferredToData
         var datas = try decoder.decode(Datas.self, from: "{\"data\":[1,2,3]}".data(using: .utf8)!)
-        XCTAssertEqual(datas.data, Data(bytes: [1,2,3]))
+        XCTAssertEqual(datas.data, Data([1,2,3]))
 
         decoder.dataDecodingStrategy = .custom({ _ in
-            return Data(bytes: [1, 2, 3])
+            return Data([1, 2, 3])
         })
         datas = try decoder.decode(Datas.self, from: "{\"data\":true}".data(using: .utf8)!)
-        XCTAssertEqual(datas.data, Data(bytes: [1,2,3]))
+        XCTAssertEqual(datas.data, Data([1,2,3]))
 
-        let data = Data(bytes: [0x01, 0x02, 0x03, 0x04, 0x05])
+        let data = Data([0x01, 0x02, 0x03, 0x04, 0x05])
         decoder.dataDecodingStrategy = .base64
         datas = try decoder.decode(Datas.self, from: "{\"data\":\"\(data.base64EncodedString())\"}".data(using: .utf8)!)
         XCTAssertEqual(datas.data, data)

@@ -355,7 +355,7 @@ class TestJSONEncoder : XCTestCase {
 
   // MARK: - Data Strategy Tests
   func testEncodingData() {
-    let data = Data(bytes: [0xDE, 0xAD, 0xBE, 0xEF])
+    let data = Data([0xDE, 0xAD, 0xBE, 0xEF])
 
     // We can't encode a top-level Data, so it'll be wrapped in a dictionary.
     let expectedJSON = "{\"value\":[222,173,190,239]}".data(using: .utf8)!
@@ -372,7 +372,7 @@ class TestJSONEncoder : XCTestCase {
   }
 
   func testEncodingDataBase64() {
-    let data = Data(bytes: [0xDE, 0xAD, 0xBE, 0xEF])
+    let data = Data([0xDE, 0xAD, 0xBE, 0xEF])
 
     // We can't encode a top-level Data, so it'll be wrapped in a dictionary.
     let expectedJSON = "{\"value\":\"3q2+7w==\"}".data(using: .utf8)!

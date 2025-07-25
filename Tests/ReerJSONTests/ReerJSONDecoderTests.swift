@@ -668,11 +668,11 @@ class ReerJSONTests: XCTestCase {
         struct Test: Codable, Equatable {
             let a: Bool
         }
-        //testRoundTrip(of: Test.self, json: #"{"a": true}"#)
-        //testRoundTrip(of: TopLevelWrapper<Test>.self, json: #"{"value": {"a": true}}"#)
-        //_testFailure(of: Test.self, json: #"{"b": true}"#, expectedError: DecodingError.keyNotFound(_CodingKey(stringValue: "a")!, DecodingError.Context(codingPath: [], debugDescription: "No value associated with a.")))
-        //_testFailure(of: Test.self, json: #"{}"#, expectedError: DecodingError.keyNotFound(_CodingKey(stringValue: "a")!, DecodingError.Context(codingPath: [], debugDescription: "No value associated with a.")))
-        //_testFailure(of: TopLevelWrapper<Test>.self, json: #"{"value": {}}"#, expectedError: DecodingError.keyNotFound(_CodingKey(stringValue: "a")!, DecodingError.Context(codingPath: [], debugDescription: "No value associated with a.")))
+        testRoundTrip(of: Test.self, json: #"{"a": true}"#)
+        testRoundTrip(of: TopLevelWrapper<Test>.self, json: #"{"value": {"a": true}}"#)
+        _testFailure(of: Test.self, json: #"{"b": true}"#, expectedError: DecodingError.keyNotFound(_CodingKey(stringValue: "a")!, DecodingError.Context(codingPath: [], debugDescription: "No value associated with a.")))
+        _testFailure(of: Test.self, json: #"{}"#, expectedError: DecodingError.keyNotFound(_CodingKey(stringValue: "a")!, DecodingError.Context(codingPath: [], debugDescription: "No value associated with a.")))
+        _testFailure(of: TopLevelWrapper<Test>.self, json: #"{"value": {}}"#, expectedError: DecodingError.keyNotFound(_CodingKey(stringValue: "a")!, DecodingError.Context(codingPath: [], debugDescription: "No value associated with a.")))
         _testFailure(of: TopLevelWrapper<Test>.self, json: #"{"value": {"b": true}}"#, expectedError: nil) //DecodingError.keyNotFound(_CodingKey(stringValue: "a")!, DecodingError.Context(codingPath: [_CodingKey(stringValue: "value")!], debugDescription: "No value associated with a.")))
     }
 
@@ -864,24 +864,6 @@ class ReerJSONTests: XCTestCase {
             return Decimal(string: numberString)!
         }
         testRoundTrip(decimals)
-        // NSDecimalNumber doesn't conform to Decodable
-        //let nsDecimals: [NSDecimalNumber] = [1.2, 1]
-        //testRoundTrip(nsDecimals)
-        
-        /*struct Aa: Equatable & Codable {
-            init(from decoder: Decoder) throws {
-                //let value = (decoder as! __JSONDecoder)
-                var outLength: Int32 = 0
-                let string = "{}"
-                string.withCString { (cString) -> Void in
-                    let context = JNTCreateContext(cString, UInt32(string.count), "".utf8CString, "".utf8CString, "".utf8CString)
-                    let value = JNTDocumentFromJSON(context, UnsafeRawPointer(cString), string.count, false, nil, true)
-                    JNTDocumentDecode__DecimalString(value, &outLength)
-                }
-            }
-        }*/
-        
-        //_testFailure(of: Aa.self, json: "{}", expectedError: DecodingError.dataCorrupted(DecodingError.Context(codingPath: [_CodingKey(index: 0)], debugDescription: "Invalid Decimal")))
         
         _testFailure(of: [Decimal].self, json: "[true]", expectedError: DecodingError.dataCorrupted(DecodingError.Context(codingPath: [_CodingKey(index: 0)], debugDescription: "Invalid Decimal")))
     }
@@ -940,5 +922,29 @@ class ReerJSONTests: XCTestCase {
         run("github_events", ghEvents.self, dateDecodingStrategy: .iso8601)
         run("twitter", Twitter.self, keyDecoding: .convertFromSnakeCase)
         run("twitterescaped", Twitter.self)
+    }
+    
+    func testPath() throws {
+        struct Test: Decodable {
+            let c: String
+        }
+        let data = """
+            {"a": {"b": {"c": "ddd"}}}
+            """.data(using: .utf8)!
+        let model = try ReerJSONDecoder().decode(Test.self, from: data, path: ["a", "b"])
+        XCTAssert(model.c == "ddd")
+        let model3 = try ReerJSONDecoder().decode(Test.self, from: data, keyPath: "a.b")
+        XCTAssert(model3.c == "ddd")
+        
+        struct Test2: Decodable {
+            let c: [Int]
+        }
+        let data2 = """
+            {"a": {"b": {"c": [1,2,3]}}}
+            """.data(using: .utf8)!
+        let model2 = try ReerJSONDecoder().decode(Test2.self, from: data2, path: ["a", "b"])
+        XCTAssert(model2.c == [1, 2, 3])
+        let model4 = try ReerJSONDecoder().decode(Test2.self, from: data2, keyPath: "a.b")
+        XCTAssert(model4.c == [1, 2, 3])
     }
 }

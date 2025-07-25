@@ -933,6 +933,8 @@ class ReerJSONTests: XCTestCase {
             """.data(using: .utf8)!
         let model = try ReerJSONDecoder().decode(Test.self, from: data, path: ["a", "b"])
         XCTAssert(model.c == "ddd")
+        let model3 = try ReerJSONDecoder().decode(Test.self, from: data, keyPath: "a.b")
+        XCTAssert(model3.c == "ddd")
         
         struct Test2: Decodable {
             let c: [Int]
@@ -942,5 +944,7 @@ class ReerJSONTests: XCTestCase {
             """.data(using: .utf8)!
         let model2 = try ReerJSONDecoder().decode(Test2.self, from: data2, path: ["a", "b"])
         XCTAssert(model2.c == [1, 2, 3])
+        let model4 = try ReerJSONDecoder().decode(Test2.self, from: data2, keyPath: "a.b")
+        XCTAssert(model4.c == [1, 2, 3])
     }
 }

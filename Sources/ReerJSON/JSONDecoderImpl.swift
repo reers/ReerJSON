@@ -393,7 +393,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
         try decodeInteger()
     }
   
-    #if !os(Linux)
+    #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: Int128.Type) throws -> Int128 {
         try decodeInteger()
@@ -420,7 +420,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
         try decodeInteger()
     }
     
-    #if !os(Linux)
+    #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: UInt128.Type) throws -> UInt128 {
         try decodeInteger()
@@ -608,7 +608,7 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
         return try decodeInteger(jsonValue, forKey: key)
     }
     
-    #if !os(Linux)
+    #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: Int128.Type, forKey key: K) throws -> Int128 {
         let jsonValue = try getValue(forKey: key)
@@ -676,7 +676,7 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
         return try decodeInteger(jsonValue, forKey: key)
     }
   
-    #if !os(Linux)
+    #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: UInt128.Type, forKey key: K) throws -> UInt128 {
         let jsonValue = try getValue(forKey: key)
@@ -981,7 +981,7 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
         return try decodeInteger(jsonValue, forKey: key)
     }
   
-    #if !os(Linux)
+    #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: Int128.Type, forKey key: K) throws -> Int128 {
         let jsonValue = try getValue(forKey: key)
@@ -1049,7 +1049,7 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
         return try decodeInteger(jsonValue, forKey: key)
     }
   
-    #if !os(Linux)
+    #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func decode(_: UInt128.Type, forKey key: K) throws -> UInt128 {
         let jsonValue = try getValue(forKey: key)
@@ -1434,7 +1434,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
         return try decodeInteger(value)
     }
   
-    #if !os(Linux)
+    #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func decode(_: Int128.Type) throws -> Int128 {
         let value = try peekNextValue(ofType: Int128.self)
@@ -1507,7 +1507,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
         return try decodeInteger(value)
     }
   
-    #if !os(Linux)
+    #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func decode(_: UInt128.Type) throws -> UInt128 {
         let value = try peekNextValue(ofType: UInt.self)

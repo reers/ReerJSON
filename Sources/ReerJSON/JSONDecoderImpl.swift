@@ -68,10 +68,10 @@ final class JSONDecoderImpl: Decoder {
         case .object:
             switch options.keyDecodingStrategy {
             case .useDefaultKeys:
-                let container = try DefaultKeyedContainer<Key>(impl: self, codingPathNode: codingPathNode)
+                let container = try DefaultKeyedDecodingContainer<Key>(impl: self, codingPathNode: codingPathNode)
                 return KeyedDecodingContainer(container)
             default:
-                let container = try PreTransformKeyedContainer<Key>(impl: self, codingPathNode: codingPathNode)
+                let container = try PreTransformKeyedDecodingContainer<Key>(impl: self, codingPathNode: codingPathNode)
                 return KeyedDecodingContainer(container)
             }
         case .null:
@@ -90,7 +90,7 @@ final class JSONDecoderImpl: Decoder {
     func unkeyedContainer() throws -> UnkeyedDecodingContainer {
         switch topValue.type {
         case .array:
-            return try UnkeyedContainer(impl: self, codingPathNode: codingPathNode)
+            return try JSONUnkeyedDecodingContainer(impl: self, codingPathNode: codingPathNode)
         case .null:
             throw DecodingError.valueNotFound([Any].self, DecodingError.Context(
                 codingPath: codingPath,
@@ -475,7 +475,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
 
 // MARK: - KeyedDecodingContainerProtocol
 
-private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerProtocol {
+private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingContainerProtocol {
     typealias Key = K
 
     let impl: JSONDecoderImpl
@@ -813,7 +813,7 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
     }
 }
 
-private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingContainerProtocol {
+private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecodingContainerProtocol {
     typealias Key = K
 
     let impl: JSONDecoderImpl
@@ -1233,7 +1233,7 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
 
 // MARK: - UnkeyedDecodingContainer
 
-private struct UnkeyedContainer: UnkeyedDecodingContainer {
+private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
     let impl: JSONDecoderImpl
     var arrayPointer: UnsafeMutablePointer<yyjson_val>?
     var peekedValue: JSON?
@@ -1300,7 +1300,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     private mutating func peekNextValue<T>(ofType type: T.Type) throws -> JSON {
         guard let nextValue = peekNextValueIfPresent(ofType: type) else {
             var message = "Unkeyed container is at end."
-            if T.self == UnkeyedContainer.self {
+            if T.self == JSONUnkeyedDecodingContainer.self {
                 message = "Cannot get nested unkeyed container -- unkeyed container is at end."
             }
             if T.self == Decoder.self {

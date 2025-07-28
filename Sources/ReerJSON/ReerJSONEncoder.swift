@@ -171,7 +171,7 @@ open class ReerJSONEncoder {
     }
     
     /// Options set on the top-level encoder to pass down the encoding hierarchy.
-    fileprivate struct _Options {
+    struct Options {
         var outputFormatting: JSONEncoder.OutputFormatting = []
         var dateEncodingStrategy: JSONEncoder.DateEncodingStrategy = .deferredToDate
         var dataEncodingStrategy: JSONEncoder.DataEncodingStrategy = .base64
@@ -181,7 +181,7 @@ open class ReerJSONEncoder {
     }
     
     /// The options set on the top-level encoder.
-    fileprivate var options = _Options()
+    fileprivate var options = Options()
     fileprivate let optionsLock = LockedState<Void>()
     
     // MARK: - Constructing a JSON Encoder
@@ -199,6 +199,54 @@ open class ReerJSONEncoder {
     /// - throws: `EncodingError.invalidValue` if a non-conforming floating-point value is encountered during encoding, and the encoding strategy is `.throw`.
     /// - throws: An error if any value throws an error during encoding.
     open func encode<T : Encodable>(_ value: T) throws -> Data {
+        guard let doc = yyjson_mut_doc_new(nil) else {
+            return try encodeWithFoundationEncoder(value)
+        }
+        defer {
+            yyjson_mut_doc_free(doc)
+        }
+        let encoder = JSONEncoderImpl(options: options, ownerEncoder: nil, mutDoc: doc)
         
+        guard let topLevelValue = try encoder.box(value) else {
+            throw EncodingError.invalidValue(value, EncodingError.Context(
+                codingPath: [],
+                debugDescription: "Top-level \(T.self) did not encode any values."
+            ))
+        }
+        
+        yyjson_mut_doc_set_root(doc, topLevelValue)
+        
+        var writeFlags: yyjson_write_flag = 0
+        if options.outputFormatting.contains(.prettyPrinted) {
+            writeFlags |= YYJSON_WRITE_PRETTY
+        }
+//        if options.outputFormatting.contains(.sortedKeys) {
+//            writeFlags |= YYJSON_WRITE_SORTED_KEYS
+//        }
+        
+        var length: Int = 0
+        guard let jsonCString = yyjson_mut_write(doc, writeFlags, &length) else {
+            throw EncodingError.invalidValue(value, EncodingError.Context(
+                codingPath: [],
+                debugDescription: "Unable to write JSON from document"
+            ))
+        }
+        defer {
+            free(jsonCString)
+        }
+        
+        return Data(bytes: jsonCString, count: length)
+    }
+    
+    func encodeWithFoundationEncoder<T : Encodable>(_ value: T) throws -> Data {
+        let encoder = Foundation.JSONEncoder()
+        encoder.outputFormatting = outputFormatting
+        encoder.dateEncodingStrategy = dateEncodingStrategy
+        encoder.dataEncodingStrategy = dataEncodingStrategy
+        encoder.nonConformingFloatEncodingStrategy = nonConformingFloatEncodingStrategy
+        encoder.keyEncodingStrategy = keyEncodingStrategy
+        encoder.userInfo = userInfo
+        return try encoder.encode(value)
     }
 }
+

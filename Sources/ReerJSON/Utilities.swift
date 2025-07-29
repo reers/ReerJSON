@@ -123,9 +123,13 @@ protocol StringDecodableDictionary {
     static var elementType: Decodable.Type { get }
 }
 
-extension Dictionary : StringDecodableDictionary where Key == String, Value: Decodable {
+extension Dictionary: StringDecodableDictionary where Key == String, Value: Decodable {
     static var elementType: Decodable.Type { return Value.self }
 }
+
+protocol StringEncodableDictionary { }
+
+extension Dictionary: StringEncodableDictionary where Key == String, Value: Encodable { }
 
 // This is a workaround for the lack of a "set value only if absent" function for Dictionary.
 extension Optional {

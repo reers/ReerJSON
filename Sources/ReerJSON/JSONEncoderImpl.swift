@@ -188,9 +188,36 @@ extension JSONEncoderImpl {
         return yyjson_mut_strncpy(mutDoc, value, value.utf8.count)
     }
     
-    func box<T: Encodable>(
+#warning("use static func or not")
+    @inline(__always)
+    func boxFloatingPoint<T: BinaryFloatingPoint & CustomStringConvertible>(
+        _ float: T,
+        for additionalKey: (some CodingKey)? = _CodingKey?.none
+    ) throws -> UnsafeMutablePointer<yyjson_mut_val> {
+        guard !float.isNaN, !float.isInfinite else {
+            if case .convertToString(let posInfString, let negInfString, let nanString) = options.nonConformingFloatEncodingStrategy {
+                switch float {
+                case T.infinity:
+                    return box(posInfString)
+                case -T.infinity:
+                    return box(negInfString)
+                default:
+                    return box(nanString)
+                }
+            }
+            throw cannotEncodeNumber(float, encoder: self, additionalKey)
+        }
+        var string = float.description
+        if string.hasSuffix(".0") {
+            string.removeLast(2)
+        }
+        return box(string)
+    }
+  
+    
+    func _box<T: Encodable>(
         _ value: T,
-        for additionalKey: (some CodingKey)?
+        for additionalKey: (some CodingKey)? = _CodingKey?.none
     ) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
         if let date = value as? Date {
             return try boxDate(date, for: additionalKey)
@@ -200,7 +227,7 @@ extension JSONEncoderImpl {
             return box(url.absoluteString)
         } else if let decimal = value as? Decimal {
             return box(decimal.description)
-        } else if let encodable = value as? _JSONStringDictionaryEncodableMarker {
+        } else if let encodable = value as? StringEncodableDictionary {
             return try self.wrap(encodable as! [String:Encodable], for: additionalKey)
         } else if let array = value as? _JSONDirectArrayEncodable {
             if options.outputFormatting.contains(.prettyPrinted) {
@@ -291,26 +318,26 @@ extension JSONEncoderImpl {
         }
     }
     
-    func boxFloat(_ value: Double) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
-        if value.isInfinite || value.isNaN {
-            guard case .convertToString(let positiveInfinity, let negativeInfinity, let nan) = options.nonConformingFloatEncodingStrategy else {
-                throw EncodingError.invalidValue(value, EncodingError.Context(
-                    codingPath: codingPath,
-                    debugDescription: "Unable to encode \(value) directly in JSON."
-                ))
-            }
-            
-            if value == Double.infinity {
-                return yyjson_mut_strcpy(mutDoc, positiveInfinity)
-            } else if value == -Double.infinity {
-                return yyjson_mut_strcpy(mutDoc, negativeInfinity)
-            } else {
-                return yyjson_mut_strcpy(mutDoc, nan)
-            }
-        }
-        
-        return yyjson_mut_real(mutDoc, value)
-    }
+//    func boxFloat(_ value: Double) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+//        if value.isInfinite || value.isNaN {
+//            guard case .convertToString(let positiveInfinity, let negativeInfinity, let nan) = options.nonConformingFloatEncodingStrategy else {
+//                throw EncodingError.invalidValue(value, EncodingError.Context(
+//                    codingPath: codingPath,
+//                    debugDescription: "Unable to encode \(value) directly in JSON."
+//                ))
+//            }
+//            
+//            if value == Double.infinity {
+//                return yyjson_mut_strcpy(mutDoc, positiveInfinity)
+//            } else if value == -Double.infinity {
+//                return yyjson_mut_strcpy(mutDoc, negativeInfinity)
+//            } else {
+//                return yyjson_mut_strcpy(mutDoc, nan)
+//            }
+//        }
+//        
+//        return yyjson_mut_real(mutDoc, value)
+//    }
     
     func boxDate(
         _ date: Date,
@@ -411,6 +438,19 @@ extension JSONEncoderImpl {
         
         return result
     }
+    
+    @inline(never)
+    fileprivate func cannotEncodeNumber<T: BinaryFloatingPoint>(
+        _ float: T,
+        encoder: JSONEncoderImpl,
+        _ additionalKey: (some CodingKey)?
+    ) -> EncodingError {
+        let path = encoder.codingPath + (additionalKey.map { [$0] } ?? [])
+        return EncodingError.invalidValue(float, .init(
+            codingPath: path,
+            debugDescription: "Unable to encode \(T.self).\(float) directly in JSON."
+        ))
+    }
 }
 
 // MARK: - SingleValueEncodingContainer
@@ -433,103 +473,86 @@ extension JSONEncoderImpl: SingleValueEncodingContainer {
     
     func encode(_ value: String) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_strcpy(mutDoc, value)
+        singleValue = box(value)
     }
     
     func encode(_ value: Double) throws {
         assertCanEncodeNewValue()
-        let mutValue = try encoder.boxFloat(value)
-        encoder.setEncodedValue(mutValue)
+        singleValue = try boxFloatingPoint(value)
     }
     
     func encode(_ value: Float) throws {
         assertCanEncodeNewValue()
-        let mutValue = try encoder.boxFloat(Double(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = try boxFloatingPoint(value)
     }
     
     func encode(_ value: Int) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     func encode(_ value: Int8) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     func encode(_ value: Int16) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     func encode(_ value: Int32) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     func encode(_ value: Int64) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, value)
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     func encode(_ value: UInt) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     func encode(_ value: UInt8) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     func encode(_ value: UInt16) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     func encode(_ value: UInt32) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     func encode(_ value: UInt64) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, value)
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func encode(_ value: Int128) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_strcpy(encoder.mutDoc, String(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func encode(_ value: UInt128) throws {
         assertCanEncodeNewValue()
-        let mutValue = yyjson_mut_strcpy(encoder.mutDoc, String(value))
-        encoder.setEncodedValue(mutValue)
+        singleValue = box(value)
     }
     #endif
     
     func encode<T: Encodable>(_ value: T) throws {
         assertCanEncodeNewValue()
-        let mutValue = try encoder.with(path: codingPathNode) {
-            try encoder.box(value)
-        }
-        encoder.setEncodedValue(mutValue)
+        singleValue = try _box(value)
     }
 }
 

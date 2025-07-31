@@ -188,6 +188,31 @@ extension JSONEncoderImpl {
         return yyjson_mut_strncpy(mutDoc, value, value.utf8.count)
     }
     
+    func box(
+        _ dict: [String: Encodable],
+        for addtionalKey: (some CodingKey)? = _CodingKey?.none
+    ) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+        var result: [String: UnsafeMutablePointer<yyjson_mut_val>] = [:]
+        result.reserveCapacity(dict.count)
+
+#warning("mutDoc????")
+        let encoder = JSONEncoderImpl(options: options, ownerEncoder: self, mutDoc: mutDoc)
+        for (key, value) in dict {
+            encoder.codingKey = _CodingKey(stringValue: key)
+            result[key] = try encoder.box(value)
+        }
+#warning("the return value???")
+        return object
+        
+    }
+    
+    func box(
+        _ value: Encodable,
+        for additionalKey: (some CodingKey)? = _CodingKey?.none
+    ) throws -> UnsafeMutablePointer<yyjson_mut_val> {
+        return try _box(value, for: additionalKey) ?? yyjson_mut_obj(mutDoc)
+    }
+    
 #warning("use static func or not")
     @inline(__always)
     func boxFloatingPoint<T: BinaryFloatingPoint & CustomStringConvertible>(
@@ -228,7 +253,7 @@ extension JSONEncoderImpl {
         } else if let decimal = value as? Decimal {
             return box(decimal.description)
         } else if let encodable = value as? StringEncodableDictionary {
-            return try self.wrap(encodable as! [String:Encodable], for: additionalKey)
+            return try box(encodable as! [String: Encodable], for: additionalKey)
         } else if let array = value as? _JSONDirectArrayEncodable {
             if options.outputFormatting.contains(.prettyPrinted) {
                 let (bytes, lengths) = try array.individualElementRepresentation(encoder: self, additionalKey)

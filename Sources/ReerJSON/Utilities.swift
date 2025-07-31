@@ -131,104 +131,41 @@ protocol StringEncodableDictionary { }
 
 extension Dictionary: StringEncodableDictionary where Key == String, Value: Encodable {}
 
-/// A protocol used to determine whether a value is an `Array` containing values that allow
-/// us to bypass UnkeyedEncodingContainer overhead by directly encoding the contents as
-/// strings as passing that down to the JSONWriter.
-protocol EncodableArray {
-    @inline(__always)
-    func nonPrettyJSONRepresentation(encoder: JSONEncoderImpl, _ additionalKey: (some CodingKey)?) throws -> [UInt8]
-    @inline(__always)
-    func individualElementRepresentation(encoder: JSONEncoderImpl, _ additionalKey: (some CodingKey)?) throws -> ([UInt8], lengths: [Int])
-}
-protocol EncodableArrayElement {
-//    @inline(__always)
-//    func serializeJsonRepresentation(into writer: inout JSONWriter, encoder: JSONEncoderImpl, _ additionalKey: (some CodingKey)?) throws -> Int
-}
-extension EncodableArrayElement where Self: FixedWidthInteger & CustomStringConvertible {
-//    fileprivate func serializeJsonRepresentation(into writer: inout JSONWriter, encoder: JSONEncoderImpl, _ additionalKey: (some CodingKey)?) throws -> Int {
-//        return writer.serializeSimpleStringContents(description)
-//    }
-}
-extension Int : EncodableArrayElement { }
-extension Int8 : EncodableArrayElement { }
-extension Int16 : EncodableArrayElement { }
-extension Int32 : EncodableArrayElement { }
-extension Int64 : EncodableArrayElement { }
+/// 用于标识可以优化编码的数组类型
+/// 与 Foundation 不同，yyjson 版本不需要复杂的字节级优化
+/// yyjson 的 C 实现本身就足够高效
+protocol EncodableArray {}
+
+/// 标识数组元素类型，用于类型检查和优化
+protocol EncodableArrayElement {}
+
+// 基础数值类型扩展
+extension Int : EncodableArrayElement {}
+extension Int8 : EncodableArrayElement {}
+extension Int16 : EncodableArrayElement {}
+extension Int32 : EncodableArrayElement {}
+extension Int64 : EncodableArrayElement {}
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-extension Int128 : EncodableArrayElement { }
-extension UInt : EncodableArrayElement { }
-extension UInt8 : EncodableArrayElement { }
-extension UInt16 : EncodableArrayElement { }
-extension UInt32 : EncodableArrayElement { }
-extension UInt64 : EncodableArrayElement { }
+extension Int128 : EncodableArrayElement {}
+
+extension UInt : EncodableArrayElement {}
+extension UInt8 : EncodableArrayElement {}
+extension UInt16 : EncodableArrayElement {}
+extension UInt32 : EncodableArrayElement {}
+extension UInt64 : EncodableArrayElement {}
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-extension UInt128 : EncodableArrayElement { }
-extension String: EncodableArrayElement {
-//    fileprivate func serializeJsonRepresentation(into writer: inout JSONWriter, encoder: JSONEncoderImpl, _ additionalKey: (some CodingKey)?) -> Int {
-//        return writer.serializeString(self)
-//    }
-}
-extension Float: EncodableArrayElement {
-    fileprivate func serializeJsonRepresentation(into writer: inout JSONWriter, encoder: JSONEncoderImpl, _ additionalKey: (some CodingKey)?) throws -> Int {
-        switch try JSONEncoderValue.number(from: self, encoder: encoder, additionalKey) {
-        case .number(let string):
-            return writer.serializeSimpleStringContents(string)
-        case .string(let string):
-            return writer.serializeSimpleString(string)
-        default:
-            fatalError("Impossible JSON value type coming from number formatting")
-        }
-    }
-}
+extension UInt128 : EncodableArrayElement {}
 
-extension Double: EncodableArrayElement {
-    fileprivate func serializeJsonRepresentation(into writer: inout JSONWriter, encoder: JSONEncoderImpl, _ additionalKey: (some CodingKey)?) throws -> Int {
-        switch try JSONEncoderValue.number(from: self, encoder: encoder, additionalKey) {
-        case .number(let string):
-            return writer.serializeSimpleStringContents(string)
-        case .string(let string):
-            return writer.serializeSimpleString(string)
-        default:
-            fatalError("Impossible JSON value type coming from number formatting")
-        }
-    }
-}
+extension Float : EncodableArrayElement {}
+extension Double : EncodableArrayElement {}
+extension String : EncodableArrayElement {}
+extension Bool : EncodableArrayElement {}
 
-// This is not yet extended to Double & Float. That case is more complicated, given the possibility of Infinity or NaN values, which require nonConformingFloatEncodingStrategy and the ability to throw errors.
+// 让嵌套数组也符合 EncodableArrayElement
+extension Array : EncodableArrayElement where Element: EncodableArrayElement {}
 
-extension Array : EncodableArray where Element: EncodableArrayElement {
-    func nonPrettyJSONRepresentation(encoder: JSONEncoderImpl, _ additionalKey: (some CodingKey)?) throws -> [UInt8] {
-        var writer = JSONWriter(options: encoder.options.outputFormatting)
-
-        writer.writer(ascii: ._openbracket)
-
-        let count = count
-        if count > 0 {
-            _ = try self[0].serializeJsonRepresentation(into: &writer, encoder: encoder, additionalKey)
-
-            for idx in 1 ..< count {
-                writer.writer(ascii: ._comma)
-                _ = try self[idx].serializeJsonRepresentation(into: &writer, encoder: encoder, additionalKey)
-            }
-        }
-
-        writer.writer(ascii: ._closebracket)
-        return writer.bytes
-    }
-    
-    func individualElementRepresentation(encoder: JSONEncoderImpl, _ additionalKey: (some CodingKey)?) throws -> ([UInt8], lengths: [Int]) {
-        var writer = JSONWriter(options: encoder.options.outputFormatting)
-        var byteLengths = [Int]()
-        byteLengths.reserveCapacity(self.count)
-
-        for element in self {
-            let length = try element.serializeJsonRepresentation(into: &writer, encoder: encoder, additionalKey)
-            byteLengths.append(length)
-        }
-
-        return (writer.bytes, lengths: byteLengths)
-    }
-}
+// 单一的数组扩展，支持所有情况
+extension Array : EncodableArray {}
 
 
 // This is a workaround for the lack of a "set value only if absent" function for Dictionary.

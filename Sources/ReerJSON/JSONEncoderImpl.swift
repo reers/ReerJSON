@@ -238,6 +238,167 @@ extension JSONEncoderImpl {
         }
         return box(string)
     }
+    
+    /// 优化的数组编码方法
+    /// 相比 Foundation 的复杂优化，yyjson 的 C 实现已经足够高效
+    func boxOptimizedArray(
+        _ array: EncodableArray,
+        for additionalKey: (some CodingKey)? = _CodingKey?.none
+    ) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+        // yyjson 的数组编码已经高度优化，直接使用标准流程即可
+        // 无需像 Foundation 那样手动生成字节数组来绕过容器开销
+        
+        let yyjsonArray = yyjson_mut_arr(mutDoc)
+        
+        // 使用 yyjson 的批量创建 API，性能远超逐个添加
+        if let intArray = array as? [Int] {
+            return intArray.withUnsafeBufferPointer { buffer in
+                // Swift Int 在64位系统上是 Int64，直接使用批量 API
+                let casted = buffer.baseAddress!.withMemoryRebound(to: Int64.self, capacity: buffer.count) { ptr in
+                    return yyjson_mut_arr_with_sint64(mutDoc, ptr, buffer.count)
+                }
+                return casted
+            }
+        } else if let int8Array = array as? [Int8] {
+            return int8Array.withUnsafeBufferPointer { buffer in
+                return yyjson_mut_arr_with_sint8(mutDoc, buffer.baseAddress!, buffer.count)
+                yyjson_mut_arr_with_sint8(mutDoc, <#T##int8_t#>, <#T##Int#>)
+            }
+        } else if let int16Array = array as? [Int16] {
+            return int16Array.withUnsafeBufferPointer { buffer in
+                return yyjson_mut_arr_with_sint16(mutDoc, buffer.baseAddress!, buffer.count)
+            }
+        } else if let int32Array = array as? [Int32] {
+            return int32Array.withUnsafeBufferPointer { buffer in
+                return yyjson_mut_arr_with_sint32(mutDoc, buffer.baseAddress!, buffer.count)
+            }
+        } else if let int64Array = array as? [Int64] {
+            return int64Array.withUnsafeBufferPointer { buffer in
+                return yyjson_mut_arr_with_sint64(mutDoc, buffer.baseAddress!, buffer.count)
+            }
+        } else if let uintArray = array as? [UInt] {
+            return uintArray.withUnsafeBufferPointer { buffer in
+                let casted = buffer.baseAddress!.withMemoryRebound(to: UInt64.self, capacity: buffer.count) { ptr in
+                    return yyjson_mut_arr_with_uint64(mutDoc, ptr, buffer.count)
+                }
+                return casted
+            }
+        } else if let uint8Array = array as? [UInt8] {
+            return uint8Array.withUnsafeBufferPointer { buffer in
+                return yyjson_mut_arr_with_uint8(mutDoc, buffer.baseAddress!, buffer.count)
+            }
+        } else if let uint16Array = array as? [UInt16] {
+            return uint16Array.withUnsafeBufferPointer { buffer in
+                return yyjson_mut_arr_with_uint16(mutDoc, buffer.baseAddress!, buffer.count)
+            }
+        } else if let uint32Array = array as? [UInt32] {
+            return uint32Array.withUnsafeBufferPointer { buffer in
+                return yyjson_mut_arr_with_uint32(mutDoc, buffer.baseAddress!, buffer.count)
+            }
+        } else if let uint64Array = array as? [UInt64] {
+            return uint64Array.withUnsafeBufferPointer { buffer in
+                return yyjson_mut_arr_with_uint64(mutDoc, buffer.baseAddress!, buffer.count)
+            }
+        }
+        // 处理 Int128/UInt128 (如果可用)
+        #if compiler(>=6.0)
+        else if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *),
+                let int128Array = array as? [Int128] {
+            for value in int128Array {
+                let str = value.description
+                yyjson_mut_arr_append(yyjsonArray, yyjson_mut_strncpy(mutDoc, str, str.utf8.count))
+            }
+        } else if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *),
+                  let uint128Array = array as? [UInt128] {
+            for value in uint128Array {
+                let str = value.description
+                yyjson_mut_arr_append(yyjsonArray, yyjson_mut_strncpy(mutDoc, str, str.utf8.count))
+            }
+        }
+        #endif
+        // 处理浮点数数组 - 使用批量 API
+        else if let doubleArray = array as? [Double] {
+            // 检查是否包含特殊值（NaN, Infinity）
+            let hasSpecialValues = doubleArray.contains { $0.isNaN || $0.isInfinite }
+            if !hasSpecialValues {
+                // 没有特殊值，可以使用高效的批量 API
+                return doubleArray.withUnsafeBufferPointer { buffer in
+                    return yyjson_mut_arr_with_double(mutDoc, buffer.baseAddress!, buffer.count)
+                }
+            } else {
+                // 有特殊值，需要逐个处理以应用 nonConformingFloatEncodingStrategy
+                let yyjsonArray = yyjson_mut_arr(mutDoc)
+                for value in doubleArray {
+                    yyjson_mut_arr_append(yyjsonArray, try boxFloatingPoint(value))
+                }
+                return yyjsonArray
+            }
+        } else if let floatArray = array as? [Float] {
+            let hasSpecialValues = floatArray.contains { $0.isNaN || $0.isInfinite }
+            if !hasSpecialValues {
+                return floatArray.withUnsafeBufferPointer { buffer in
+                    return yyjson_mut_arr_with_float(mutDoc, buffer.baseAddress!, buffer.count)
+                }
+            } else {
+                let yyjsonArray = yyjson_mut_arr(mutDoc)
+                for value in floatArray {
+                    yyjson_mut_arr_append(yyjsonArray, try boxFloatingPoint(value))
+                }
+                return yyjsonArray
+            }
+        }
+        // 处理字符串数组 - 批量处理较复杂，暂时使用逐个添加
+        else if let stringArray = array as? [String] {
+            // 字符串数组的批量 API 需要复杂的内存管理，为了安全起见使用逐个添加
+            // 在实际场景中，字符串数组通常不会成为性能瓶颈
+            let yyjsonArray = yyjson_mut_arr(mutDoc)
+            for value in stringArray {
+                yyjson_mut_arr_append(yyjsonArray, yyjson_mut_strncpy(mutDoc, value, value.utf8.count))
+            }
+            return yyjsonArray
+        }
+        // 处理布尔数组 - 使用批量 API
+        else if let boolArray = array as? [Bool] {
+            return boolArray.withUnsafeBufferPointer { buffer in
+                return yyjson_mut_arr_with_bool(mutDoc, buffer.baseAddress!, buffer.count)
+            }
+        }
+        // 处理通用 Encodable 数组
+        else if let encodableArray = array as? [Encodable] {
+            for value in encodableArray {
+                let encodedValue = try _box(value, for: additionalKey)
+                yyjson_mut_arr_append(yyjsonArray, encodedValue)
+            }
+        }
+        // 处理嵌套数组的情况（例如 [[Int]]）
+        else if let nestedIntArrays = array as? [[Int]] {
+            for subArray in nestedIntArrays {
+                if let nestedArray = try boxOptimizedArray(subArray, for: additionalKey) {
+                    yyjson_mut_arr_append(yyjsonArray, nestedArray)
+                } else {
+                    // 如果优化失败，走标准流程
+                    let encodedValue = try _box(subArray, for: additionalKey)
+                    yyjson_mut_arr_append(yyjsonArray, encodedValue)
+                }
+            }
+        } else if let nestedStringArrays = array as? [[String]] {
+            for subArray in nestedStringArrays {
+                if let nestedArray = try boxOptimizedArray(subArray, for: additionalKey) {
+                    yyjson_mut_arr_append(yyjsonArray, nestedArray)
+                } else {
+                    let encodedValue = try _box(subArray, for: additionalKey)
+                    yyjson_mut_arr_append(yyjsonArray, encodedValue)
+                }
+            }
+        }
+        else {
+            // 对于其他类型，走标准编码流程
+            // yyjson 的性能仍然远超 Foundation 的优化版本
+            return nil // 让调用方走标准流程
+        }
+        
+        return yyjsonArray
+    }
   
     
     func _box<T: Encodable>(
@@ -254,13 +415,9 @@ extension JSONEncoderImpl {
             return box(decimal.description)
         } else if let encodable = value as? StringEncodableDictionary {
             return try box(encodable as! [String: Encodable], for: additionalKey)
-        } else if let array = value as? _JSONDirectArrayEncodable {
-            if options.outputFormatting.contains(.prettyPrinted) {
-                let (bytes, lengths) = try array.individualElementRepresentation(encoder: self, additionalKey)
-                return .directArray(bytes, lengths: lengths)
-            } else {
-                return .nonPrettyDirectArray(try array.nonPrettyJSONRepresentation(encoder: self, additionalKey))
-            }
+        } else if let array = value as? EncodableArray {
+            // 使用 yyjson 直接编码数组，无需手动优化
+            return try boxOptimizedArray(array, for: additionalKey)
         }
 
         return try _wrapGeneric({

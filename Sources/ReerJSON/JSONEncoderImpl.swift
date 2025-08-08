@@ -75,12 +75,7 @@ final class JSONEncoderImpl: Encoder {
     
     /// Contextual user-provided information for use during encoding.
     var userInfo: [CodingUserInfoKey : Any] {
-        // Bridge `[CodingUserInfoKey: any Sendable]` to `[CodingUserInfoKey: Any]`
-        var result: [CodingUserInfoKey: Any] = [:]
-        for (k, v) in self.options.userInfo {
-            result[k] = v
-        }
-        return result
+        return self.options.userInfo
     }
     
     func container<Key: CodingKey>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> {

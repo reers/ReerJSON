@@ -207,12 +207,7 @@ open class ReerJSONEncoder {
         }
         let encoder = JSONEncoderImpl(options: options, ownerEncoder: nil, mutDoc: doc)
         
-        guard let topLevelValue = try encoder.box(value) else {
-            throw EncodingError.invalidValue(value, EncodingError.Context(
-                codingPath: [],
-                debugDescription: "Top-level \(T.self) did not encode any values."
-            ))
-        }
+        let topLevelValue = try encoder.box(value)
         
         yyjson_mut_doc_set_root(doc, topLevelValue)
         

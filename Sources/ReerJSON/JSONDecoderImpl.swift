@@ -515,7 +515,7 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
     }
 
     func contains(_ key: K) -> Bool {
-        return keyValues.keys.contains(key.stringValue)
+        return keyValues[key.stringValue] != nil
     }
 
     func decodeNil(forKey key: K) throws -> Bool {
@@ -888,7 +888,7 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
     }
 
     func contains(_ key: K) -> Bool {
-        return keyValues.keys.contains(key.stringValue)
+        return keyValues[key.stringValue] != nil
     }
 
     func decodeNil(forKey key: K) throws -> Bool {

@@ -188,7 +188,7 @@ open class ReerJSONDecoder {
         
         var pointer = yyjson_doc_get_root(doc)
         for key in path {
-            pointer = yyjson_obj_get(pointer, key)
+            pointer = key.withCString { yyjson_obj_get(pointer, $0) }
         }
         
         let json = JSON(pointer: pointer)
@@ -218,7 +218,7 @@ open class ReerJSONDecoder {
         
         var pointer = yyjson_doc_get_root(doc)
         for key in keyPath.components(separatedBy: CharacterSet(charactersIn: ".")) {
-            pointer = yyjson_obj_get(pointer, key)
+            pointer = key.withCString { yyjson_obj_get(pointer, $0) }
         }
         
         let json = JSON(pointer: pointer)

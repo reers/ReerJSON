@@ -90,7 +90,7 @@ final class JSONDecoderImpl: Decoder {
     func unkeyedContainer() throws -> UnkeyedDecodingContainer {
         switch topValue.type {
         case .array:
-            return UnkeyedContainer(impl: self, codingPathNode: codingPathNode)
+            return try UnkeyedContainer(impl: self, codingPathNode: codingPathNode)
         case .null:
             throw DecodingError.valueNotFound([Any].self, DecodingError.Context(
                 codingPath: codingPath,
@@ -1237,17 +1237,27 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     let impl: JSONDecoderImpl
     var arrayPointer: UnsafeMutablePointer<yyjson_val>?
     var peekedValue: JSON?
-    let count: Int?
+    var count: Int?
+    
+    private var arrayIterator: yyjson_arr_iter
 
-    var isAtEnd: Bool { self.currentIndex >= (self.count ?? 0) }
+    var isAtEnd: Bool { arrayIterator.idx >= arrayIterator.max }
     var currentIndex = 0
 
-    init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) {
+    init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) throws {
         self.impl = impl
         self.codingPathNode = codingPathNode
         self.arrayPointer = impl.topValue.pointer
         
         self.count = Int(yyjson_arr_size(arrayPointer))
+        
+        self.arrayIterator = yyjson_arr_iter()
+        guard yyjson_arr_iter_init(arrayPointer, &self.arrayIterator) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPathNode.path,
+                debugDescription: "Can not init array iterator."
+            ))
+        }
     }
 
     let codingPathNode: CodingPathNode
@@ -1277,11 +1287,7 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
             return value
         }
         
-        guard currentIndex < (count ?? 0) else {
-            return nil
-        }
-        
-        guard let elementPtr = yyjson_arr_get(arrayPointer, currentIndex) else {
+        guard let elementPtr = yyjson_arr_iter_next(&arrayIterator) else {
             return nil
         }
         

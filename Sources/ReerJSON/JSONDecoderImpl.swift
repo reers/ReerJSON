@@ -760,7 +760,7 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
 
     @inline(__always)
     private func getValue(forKey key: some CodingKey) throws -> JSON {
-        guard let valuePtr = yyjson_obj_get(valuePointer, key.stringValue) else {
+        guard let valuePtr = key.stringValue.withCString({ yyjson_obj_get(valuePointer, $0) }) else {
             throw DecodingError.keyNotFound(key, .init(
                 codingPath: codingPath,
                 debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
@@ -771,7 +771,7 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
 
     @inline(__always)
     private func getValueIfPresent(forKey key: some CodingKey) -> JSON? {
-        guard let valuePtr = yyjson_obj_get(valuePointer, key.stringValue) else {
+        guard let valuePtr = key.stringValue.withCString({ yyjson_obj_get(valuePointer, $0) }) else {
             return nil
         }
         return JSON(pointer: valuePtr)

@@ -38,14 +38,6 @@ struct JSON {
     init(pointer: UnsafeMutablePointer<yyjson_val>?) {
         self.pointer = pointer
     }
-    
-    subscript(key: String) -> Self {
-        return .init(pointer: yyjson_obj_get(pointer, key))
-    }
-
-    subscript(index: Int) -> Self {
-        return .init(pointer: yyjson_arr_get(pointer, index))
-    }
 }
 
 extension JSON {

@@ -785,10 +785,10 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
     
     @inline(__always)
     private func decodeInteger<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T {
-        guard jsonValue.isNumber else {
-            throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
@@ -800,10 +800,10 @@ private final class DefaultKeyedContainer<K: CodingKey>: KeyedDecodingContainerP
     @inline(__always)
     private func decodeIntegerIfPresent<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T? {
         if jsonValue.isNull { return nil }
-        guard jsonValue.isNumber else {
-            throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
@@ -1158,10 +1158,10 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
     
     @inline(__always)
     private func decodeInteger<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T {
-        guard jsonValue.isNumber else {
-            throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
@@ -1173,10 +1173,10 @@ private final class PreTransformKeyedContainer<K: CodingKey>: KeyedDecodingConta
     @inline(__always)
     private func decodeIntegerIfPresent<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T? {
         if jsonValue.isNull { return nil }
-        guard jsonValue.isNumber else {
-            throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
@@ -1599,10 +1599,10 @@ private struct UnkeyedContainer: UnkeyedDecodingContainer {
     
     @inline(__always)
     private mutating func decodeInteger<T: FixedWidthInteger>(_ jsonValue: JSON) throws -> T {
-        guard jsonValue.isNumber else {
-            throw impl.createTypeMismatchError(type: T.self, for: currentCodingPath, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw impl.createTypeMismatchError(type: T.self, for: currentCodingPath, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."

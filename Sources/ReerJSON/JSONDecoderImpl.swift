@@ -90,7 +90,7 @@ final class JSONDecoderImpl: Decoder {
     func unkeyedContainer() throws -> UnkeyedDecodingContainer {
         switch topValue.type {
         case .array:
-            return JSONUnkeyedDecodingContainer(impl: self, codingPathNode: codingPathNode)
+            return try JSONUnkeyedDecodingContainer(impl: self, codingPathNode: codingPathNode)
         case .null:
             throw DecodingError.valueNotFound([Any].self, DecodingError.Context(
                 codingPath: codingPath,
@@ -515,7 +515,7 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
     }
 
     func contains(_ key: K) -> Bool {
-        return keyValues.keys.contains(key.stringValue)
+        return keyValues[key.stringValue] != nil
     }
 
     func decodeNil(forKey key: K) throws -> Bool {
@@ -760,7 +760,7 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
 
     @inline(__always)
     private func getValue(forKey key: some CodingKey) throws -> JSON {
-        guard let valuePtr = yyjson_obj_get(valuePointer, key.stringValue) else {
+        guard let valuePtr = key.stringValue.withCString({ yyjson_obj_get(valuePointer, $0) }) else {
             throw DecodingError.keyNotFound(key, .init(
                 codingPath: codingPath,
                 debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
@@ -771,7 +771,7 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
 
     @inline(__always)
     private func getValueIfPresent(forKey key: some CodingKey) -> JSON? {
-        guard let valuePtr = yyjson_obj_get(valuePointer, key.stringValue) else {
+        guard let valuePtr = key.stringValue.withCString({ yyjson_obj_get(valuePointer, $0) }) else {
             return nil
         }
         return JSON(pointer: valuePtr)
@@ -785,10 +785,10 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
     
     @inline(__always)
     private func decodeInteger<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T {
-        guard jsonValue.isNumber else {
-            throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
@@ -800,10 +800,10 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
     @inline(__always)
     private func decodeIntegerIfPresent<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T? {
         if jsonValue.isNull { return nil }
-        guard jsonValue.isNumber else {
-            throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
@@ -888,7 +888,7 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
     }
 
     func contains(_ key: K) -> Bool {
-        return keyValues.keys.contains(key.stringValue)
+        return keyValues[key.stringValue] != nil
     }
 
     func decodeNil(forKey key: K) throws -> Bool {
@@ -1158,10 +1158,10 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
     
     @inline(__always)
     private func decodeInteger<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T {
-        guard jsonValue.isNumber else {
-            throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
@@ -1173,10 +1173,10 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
     @inline(__always)
     private func decodeIntegerIfPresent<T: FixedWidthInteger>(_ jsonValue: JSON, forKey key: K) throws -> T? {
         if jsonValue.isNull { return nil }
-        guard jsonValue.isNumber else {
-            throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, forKey: key, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
@@ -1237,17 +1237,27 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
     let impl: JSONDecoderImpl
     var arrayPointer: UnsafeMutablePointer<yyjson_val>?
     var peekedValue: JSON?
-    let count: Int?
+    var count: Int?
+    
+    private var arrayIterator: yyjson_arr_iter
 
-    var isAtEnd: Bool { self.currentIndex >= (self.count ?? 0) }
+    var isAtEnd: Bool { arrayIterator.idx >= arrayIterator.max }
     var currentIndex = 0
 
-    init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) {
+    init(impl: JSONDecoderImpl, codingPathNode: CodingPathNode) throws {
         self.impl = impl
         self.codingPathNode = codingPathNode
         self.arrayPointer = impl.topValue.pointer
         
         self.count = Int(yyjson_arr_size(arrayPointer))
+        
+        self.arrayIterator = yyjson_arr_iter()
+        guard yyjson_arr_iter_init(arrayPointer, &self.arrayIterator) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPathNode.path,
+                debugDescription: "Can not init array iterator."
+            ))
+        }
     }
 
     let codingPathNode: CodingPathNode
@@ -1277,11 +1287,7 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
             return value
         }
         
-        guard currentIndex < (count ?? 0) else {
-            return nil
-        }
-        
-        guard let elementPtr = yyjson_arr_get(arrayPointer, currentIndex) else {
+        guard let elementPtr = yyjson_arr_iter_next(&arrayIterator) else {
             return nil
         }
         
@@ -1599,10 +1605,10 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
     
     @inline(__always)
     private mutating func decodeInteger<T: FixedWidthInteger>(_ jsonValue: JSON) throws -> T {
-        guard jsonValue.isNumber else {
-            throw impl.createTypeMismatchError(type: T.self, for: currentCodingPath, value: jsonValue)
-        }
         guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw impl.createTypeMismatchError(type: T.self, for: currentCodingPath, value: jsonValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."

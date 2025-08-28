@@ -188,7 +188,7 @@ open class ReerJSONDecoder {
         
         var pointer = yyjson_doc_get_root(doc)
         for key in path {
-            pointer = yyjson_obj_get(pointer, key)
+            pointer = key.withCString { yyjson_obj_get(pointer, $0) }
         }
         
         let json = JSON(pointer: pointer)
@@ -206,7 +206,11 @@ open class ReerJSONDecoder {
     /// - throws: An error if any value throws an error during decoding.
     open func decode<T: Decodable>(_ type: T.Type, from data: Data, keyPath: String) throws -> T {
         let doc = data.withUnsafeBytes {
-            yyjson_read($0.bindMemory(to: CChar.self).baseAddress, data.count, YYJSON_READ_NUMBER_AS_RAW)
+            yyjson_read(
+                $0.bindMemory(to: CChar.self).baseAddress,
+                data.count,
+                YYJSON_READ_NUMBER_AS_RAW | YYJSON_READ_JSON5
+            )
         }
         guard let doc else {
             return try decodeWithFoundationDecoder(type, from: data)
@@ -218,7 +222,7 @@ open class ReerJSONDecoder {
         
         var pointer = yyjson_doc_get_root(doc)
         for key in keyPath.components(separatedBy: CharacterSet(charactersIn: ".")) {
-            pointer = yyjson_obj_get(pointer, key)
+            pointer = key.withCString { yyjson_obj_get(pointer, $0) }
         }
         
         let json = JSON(pointer: pointer)

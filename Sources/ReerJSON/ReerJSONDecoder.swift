@@ -206,7 +206,11 @@ open class ReerJSONDecoder {
     /// - throws: An error if any value throws an error during decoding.
     open func decode<T: Decodable>(_ type: T.Type, from data: Data, keyPath: String) throws -> T {
         let doc = data.withUnsafeBytes {
-            yyjson_read($0.bindMemory(to: CChar.self).baseAddress, data.count, YYJSON_READ_NUMBER_AS_RAW)
+            yyjson_read(
+                $0.bindMemory(to: CChar.self).baseAddress,
+                data.count,
+                YYJSON_READ_NUMBER_AS_RAW | YYJSON_READ_JSON5
+            )
         }
         guard let doc else {
             return try decodeWithFoundationDecoder(type, from: data)

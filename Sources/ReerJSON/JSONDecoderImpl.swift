@@ -507,7 +507,7 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
         self.valuePointer = impl.topValue.pointer
     }
 
-    public var codingPath : [CodingKey] {
+    var codingPath : [CodingKey] {
         impl.codingPath
     }
 
@@ -880,7 +880,7 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
         return result
     }
 
-    public var codingPath : [CodingKey] {
+    var codingPath : [CodingKey] {
         impl.codingPath
     }
 
@@ -1262,7 +1262,8 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
 
     let codingPathNode: CodingPathNode
     
-    public var codingPath: [CodingKey] {
+    @inline(__always)
+    var codingPath: [CodingKey] {
         codingPathNode.path
     }
 
@@ -1293,7 +1294,8 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
             )
         )
     }
-
+    
+    @inline(__always)
     private mutating func advanceToNextValue() {
         currentIndex += 1
         yyjson_arr_iter_next(&arrayIterator)

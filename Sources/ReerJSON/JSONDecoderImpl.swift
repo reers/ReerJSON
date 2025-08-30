@@ -168,8 +168,8 @@ final class JSONDecoderImpl: Decoder {
         if type == Decimal.self {
             return try unboxDecimal(from: value, for: codingPathNode, additionalKey) as! T
         }
-        if T.self is StringDecodableDictionary.Type {
-            return try unboxDictionary(from: value, for: codingPathNode, additionalKey)
+        if let dictType = type as? StringDecodableDictionary.Type {
+            return try unboxDictionary(from: value, as: dictType, for: codingPathNode, additionalKey)
         }
         
         return try with(value: value, path: codingPathNode.appending(additionalKey)) {
@@ -265,12 +265,13 @@ final class JSONDecoderImpl: Decoder {
         return decimal
     }
     
-    private func unboxDictionary<T: Decodable, K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> T {
+    private func unboxDictionary<T: Decodable, K: CodingKey>(
+        from value: JSON,
+        as dictType: StringDecodableDictionary.Type,
+        for codingPathNode: CodingPathNode,
+        _ additionalKey: K? = nil
+    ) throws -> T {
         try checkNotNull(value, expectedType: [String: Any].self, for: codingPathNode, additionalKey)
-        
-        guard let dictType = T.self as? StringDecodableDictionary.Type else {
-            preconditionFailure("Must only be called if T implements StringDecodableDictionary")
-        }
         
         guard value.isObject else {
             throw DecodingError.typeMismatch([String: Any].self, .init(

@@ -170,7 +170,7 @@ open class ReerJSONDecoder {
     ///
     /// - parameter type: The type of the value to decode.
     /// - parameter data: The data to decode from.
-    /// - parameter path: The decoding container path.
+    /// - parameter path: The decoding container path, `["user", "info"]`
     /// - returns: A value of the requested type.
     /// - throws: `DecodingError.dataCorrupted` if values requested from the payload are corrupted, or if the given data is not valid JSON.
     /// - throws: An error if any value throws an error during decoding.
@@ -204,34 +204,16 @@ open class ReerJSONDecoder {
     ///
     /// - parameter type: The type of the value to decode.
     /// - parameter data: The data to decode from.
-    /// - parameter keyPath: The decoding container path, "user.info".
+    /// - parameter path: The decoding container path, `"user.info"`
     /// - returns: A value of the requested type.
     /// - throws: `DecodingError.dataCorrupted` if values requested from the payload are corrupted, or if the given data is not valid JSON.
     /// - throws: An error if any value throws an error during decoding.
-    open func decode<T: Decodable>(_ type: T.Type, from data: Data, keyPath: String) throws -> T {
-        let doc = data.withUnsafeBytes {
-            yyjson_read(
-                $0.bindMemory(to: CChar.self).baseAddress,
-                data.count,
-                YYJSON_READ_NUMBER_AS_RAW
-            )
-        }
-        guard let doc else {
-            return try decodeWithFoundationDecoder(type, from: data)
-        }
-        
-        defer {
-            yyjson_doc_free(doc)
-        }
-        
-        var pointer = yyjson_doc_get_root(doc)
-        for key in keyPath.components(separatedBy: CharacterSet(charactersIn: ".")) {
-            pointer = key.withCString { yyjson_obj_get(pointer, $0) }
-        }
-        
-        let json = JSON(pointer: pointer)
-        let impl = JSONDecoderImpl(json: json, userInfo: userInfo, codingPathNode: .root, options: options)
-        return try impl.unbox(json, as: type, for: .root, _CodingKey?.none)
+    open func decode<T: Decodable>(_ type: T.Type, from data: Data, path: String) throws -> T {
+        return try decode(
+            type,
+            from: data,
+            path: path.components(separatedBy: CharacterSet(charactersIn: "."))
+        )
     }
     
     func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data) throws -> T {

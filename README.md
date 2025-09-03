@@ -8,6 +8,7 @@ ReerJSON is a really fast JSON parser, and it's inspired by [ZippyJSON](https://
 
 # Benchmarks
 
+[Code for Benchmarks](https://github.com/Asura19/ReerJSONBenchmark)
 
 # Usage
 Just replace `JSONDecoder` with `ReerJSONDecoder` wherever you want to use it. So instead of `let decoder = JSONDecoder()`, do `let decoder = ReerJSONDecoder()`, and everything will just work. This is because `ReerJSONDecoder` has the exact same API as `JSONDecoder`. Also, don't forget to add `import ReerJSON` in files where you use it.

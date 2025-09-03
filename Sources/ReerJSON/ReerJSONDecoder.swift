@@ -216,6 +216,51 @@ open class ReerJSONDecoder {
         )
     }
     
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    open func decode<T: DecodableWithConfiguration>(
+        _ type: T.Type,
+        from data: Data,
+        path: [String] = [],
+        configuration: T.DecodingConfiguration
+    ) throws -> T {
+        let doc = data.withUnsafeBytes {
+            yyjson_read(
+                $0.bindMemory(to: CChar.self).baseAddress,
+                data.count,
+                YYJSON_READ_NUMBER_AS_RAW
+            )
+        }
+        guard let doc else {
+            return try decodeWithFoundationDecoder(type, from: data, configuration: configuration)
+        }
+        
+        defer {
+            yyjson_doc_free(doc)
+        }
+        
+        var pointer = yyjson_doc_get_root(doc)
+        for key in path {
+            pointer = key.withCString { yyjson_obj_get(pointer, $0) }
+        }
+        
+        let json = JSON(pointer: pointer)
+        let impl = JSONDecoderImpl(json: json, userInfo: userInfo, codingPathNode: .root, options: options)
+        return try impl.unbox(json, as: type, configuration: configuration, for: .root,  _CodingKey?.none)
+    }
+    
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    open func decode<T, C>(
+        _ type: T.Type,
+        from data: Data,
+        path: [String] = [],
+        configuration: C.Type
+    ) throws -> T
+    where T: DecodableWithConfiguration,
+          C: DecodingConfigurationProviding,
+          T.DecodingConfiguration == C.DecodingConfiguration {
+        try decode(type, from: data, configuration: C.decodingConfiguration)
+    }
+    
     func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data) throws -> T {
         let decoder = Foundation.JSONDecoder()
         decoder.dataDecodingStrategy = dataDecodingStrategy
@@ -224,5 +269,20 @@ open class ReerJSONDecoder {
         decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
         decoder.userInfo = userInfo
         return try decoder.decode(type, from: data)
+    }
+    
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    func decodeWithFoundationDecoder<T : DecodableWithConfiguration>(
+        _ type: T.Type,
+        from data: Data,
+        configuration: T.DecodingConfiguration
+    ) throws -> T {
+        let decoder = Foundation.JSONDecoder()
+        decoder.dataDecodingStrategy = dataDecodingStrategy
+        decoder.dateDecodingStrategy = dateDecodingStrategy
+        decoder.keyDecodingStrategy = keyDecodingStrategy
+        decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
+        decoder.userInfo = userInfo
+        return try decoder.decode(type, from: data, configuration: configuration)
     }
 }

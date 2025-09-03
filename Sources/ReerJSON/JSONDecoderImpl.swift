@@ -177,6 +177,20 @@ final class JSONDecoderImpl: Decoder {
         }
     }
     
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    @inline(__always)
+    func unbox<T: DecodableWithConfiguration>(
+        _ value: JSON,
+        as type: T.Type,
+        configuration: T.DecodingConfiguration,
+        for codingPathNode: CodingPathNode,
+        _ additionalKey: (some CodingKey)? = nil
+    ) throws -> T {
+        return try with(value: value, path: codingPathNode.appending(additionalKey)) {
+            try type.init(from: self, configuration: configuration)
+        }
+    }
+    
     private func unboxDate<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> Date {
         try checkNotNull(value, expectedType: Date.self, for: codingPathNode, additionalKey)
         

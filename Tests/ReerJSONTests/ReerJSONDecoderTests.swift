@@ -947,4 +947,289 @@ class ReerJSONTests: XCTestCase {
         let model4 = try ReerJSONDecoder().decode(Test2.self, from: data2, path: "a.b")
         XCTAssert(model4.c == [1, 2, 3])
     }
+    
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    func testDecodableWithConfiguration() throws {
+        
+        struct DecodingConfig {
+            let prefix: String
+            let multiplier: Int
+        }
+        
+        struct ConfigurableModel: DecodableWithConfiguration, Equatable {
+            let value: String
+            let number: Int
+            
+            init(from decoder: Decoder, configuration: DecodingConfig) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                let rawValue = try container.decode(String.self, forKey: .value)
+                let rawNumber = try container.decode(Int.self, forKey: .number)
+                
+                self.value = configuration.prefix + rawValue
+                self.number = rawNumber * configuration.multiplier
+            }
+            
+            enum CodingKeys: String, CodingKey {
+                case value, number
+            }
+        }
+        
+        let json = """
+            {"value": "test", "number": 5}
+            """.data(using: .utf8)!
+        
+        let config = DecodingConfig(prefix: "prefix_", multiplier: 2)
+        let decoder = ReerJSONDecoder()
+        
+        // 测试基本的配置解码
+        let result = try decoder.decode(ConfigurableModel.self, from: json, configuration: config)
+        XCTAssertEqual(result.value, "prefix_test")
+        XCTAssertEqual(result.number, 10)
+        
+        // 测试与 Foundation.JSONDecoder 的兼容性
+        let foundationDecoder = JSONDecoder()
+        let foundationResult = try foundationDecoder.decode(ConfigurableModel.self, from: json, configuration: config)
+        XCTAssertEqual(result, foundationResult)
+    }
+    
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    func testDecodableWithConfigurationProvider() throws {
+        // 定义配置结构
+        struct AppConfig {
+            let apiVersion: String
+            let debug: Bool
+        }
+        
+        // 定义配置提供者
+        struct AppConfigProvider: DecodingConfigurationProviding {
+            static let decodingConfiguration = AppConfig(apiVersion: "v2", debug: true)
+        }
+        
+        // 定义使用配置的模型
+        struct APIModel: DecodableWithConfiguration, Equatable {
+            let endpoint: String
+            let data: String
+            
+            init(from decoder: Decoder, configuration: AppConfig) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                let rawEndpoint = try container.decode(String.self, forKey: .endpoint)
+                self.data = try container.decode(String.self, forKey: .data)
+                
+                // 根据配置修改端点
+                if configuration.debug {
+                    self.endpoint = "/debug/\(configuration.apiVersion)/\(rawEndpoint)"
+                } else {
+                    self.endpoint = "/\(configuration.apiVersion)/\(rawEndpoint)"
+                }
+            }
+            
+            enum CodingKeys: String, CodingKey {
+                case endpoint, data
+            }
+        }
+        
+        let json = """
+            {"endpoint": "users", "data": "userdata"}
+            """.data(using: .utf8)!
+        
+        let decoder = ReerJSONDecoder()
+        
+        // 测试配置提供者
+        let result = try decoder.decode(APIModel.self, from: json, configuration: AppConfigProvider.self)
+        XCTAssertEqual(result.endpoint, "/debug/v2/users")
+        XCTAssertEqual(result.data, "userdata")
+        
+        // 测试与 Foundation.JSONDecoder 的兼容性
+        let foundationDecoder = JSONDecoder()
+        let foundationResult = try foundationDecoder.decode(APIModel.self, from: json, configuration: AppConfigProvider.self)
+        XCTAssertEqual(result, foundationResult)
+    }
+    
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    func testDecodableWithConfigurationAndPath() throws {
+        // 定义配置
+        struct PathConfig {
+            let transform: Bool
+        }
+        
+        // 定义嵌套模型
+        struct NestedConfigurableModel: DecodableWithConfiguration, Equatable {
+            let name: String
+            let active: Bool
+            
+            init(from decoder: Decoder, configuration: PathConfig) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                let rawName = try container.decode(String.self, forKey: .name)
+                let rawActive = try container.decode(Bool.self, forKey: .active)
+                
+                // 根据配置转换数据
+                if configuration.transform {
+                    self.name = rawName.uppercased()
+                    self.active = !rawActive
+                } else {
+                    self.name = rawName
+                    self.active = rawActive
+                }
+            }
+            
+            enum CodingKeys: String, CodingKey {
+                case name, active
+            }
+        }
+        
+        let json = """
+            {
+                "user": {
+                    "profile": {
+                        "name": "john",
+                        "active": false
+                    }
+                }
+            }
+            """.data(using: .utf8)!
+        
+        let config = PathConfig(transform: true)
+        let decoder = ReerJSONDecoder()
+        
+        // 测试带路径的配置解码
+        let result = try decoder.decode(NestedConfigurableModel.self, from: json, path: ["user", "profile"], configuration: config)
+        XCTAssertEqual(result.name, "JOHN")
+        XCTAssertEqual(result.active, true)
+        
+        // 测试不带路径的配置解码（根级别）
+        let rootJson = """
+            {
+                "name": "alice",
+                "active": true
+            }
+            """.data(using: .utf8)!
+        
+        let rootResult = try decoder.decode(NestedConfigurableModel.self, from: rootJson, configuration: config)
+        XCTAssertEqual(rootResult.name, "ALICE")
+        XCTAssertEqual(rootResult.active, false)
+    }
+    
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    func testDecodableWithConfigurationArray() throws {
+        // 定义配置
+        struct ArrayConfig {
+            let filterNegative: Bool
+        }
+        
+        // 定义数组项模型
+        struct NumberModel: DecodableWithConfiguration, Equatable {
+            let value: Int
+            let isPositive: Bool
+            
+            init(from decoder: Decoder, configuration: ArrayConfig) throws {
+                let container = try decoder.singleValueContainer()
+                let rawValue = try container.decode(Int.self)
+                
+                if configuration.filterNegative && rawValue < 0 {
+                    throw DecodingError.dataCorrupted(
+                        DecodingError.Context(
+                            codingPath: decoder.codingPath,
+                            debugDescription: "Negative numbers are not allowed"
+                        )
+                    )
+                }
+                
+                self.value = rawValue
+                self.isPositive = rawValue >= 0
+            }
+        }
+        
+        let json = """
+            [1, 2, 3, -1, 5]
+            """.data(using: .utf8)!
+        
+        let allowNegativeConfig = ArrayConfig(filterNegative: false)
+        let filterNegativeConfig = ArrayConfig(filterNegative: true)
+        let decoder = ReerJSONDecoder()
+        
+        // 测试允许负数的配置
+        let result1 = try decoder.decode([NumberModel].self, from: json, configuration: allowNegativeConfig)
+        XCTAssertEqual(result1.count, 5)
+        XCTAssertEqual(result1[3].value, -1)
+        XCTAssertEqual(result1[3].isPositive, false)
+        
+        // 测试过滤负数的配置应该抛出错误
+        XCTAssertThrowsError(try decoder.decode([NumberModel].self, from: json, configuration: filterNegativeConfig)) { error in
+            if let decodingError = error as? DecodingError,
+               case .dataCorrupted(let context) = decodingError {
+                XCTAssertEqual(context.debugDescription, "Negative numbers are not allowed")
+            } else {
+                XCTFail("Expected DecodingError.dataCorrupted")
+            }
+        }
+    }
+    
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    func testDecodableWithConfigurationComplexTypes() throws {
+        // 定义复杂配置
+        struct ComplexConfig {
+            let dateFormat: String
+            let numberFormat: String
+            let enableValidation: Bool
+        }
+        
+        // 定义复杂模型
+        struct ComplexModel: DecodableWithConfiguration, Equatable {
+            let id: String
+            let timestamp: String
+            let score: String
+            
+            init(from decoder: Decoder, configuration: ComplexConfig) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                
+                self.id = try container.decode(String.self, forKey: .id)
+                
+                // 根据配置格式化时间戳
+                let rawTimestamp = try container.decode(Int.self, forKey: .timestamp)
+                self.timestamp = "\(configuration.dateFormat):\(rawTimestamp)"
+                
+                // 根据配置格式化分数
+                let rawScore = try container.decode(Double.self, forKey: .score)
+                if configuration.enableValidation && rawScore < 0 {
+                    throw DecodingError.dataCorrupted(
+                        DecodingError.Context(
+                            codingPath: decoder.codingPath,
+                            debugDescription: "Score cannot be negative"
+                        )
+                    )
+                }
+                self.score = "\(configuration.numberFormat):\(rawScore)"
+            }
+            
+            enum CodingKeys: String, CodingKey {
+                case id, timestamp, score
+            }
+        }
+        
+        let json = """
+            {"id": "test123", "timestamp": 1609459200, "score": 95.5}
+            """.data(using: .utf8)!
+        
+        let config = ComplexConfig(dateFormat: "ISO", numberFormat: "PERCENT", enableValidation: true)
+        let decoder = ReerJSONDecoder()
+        
+        let result = try decoder.decode(ComplexModel.self, from: json, configuration: config)
+        XCTAssertEqual(result.id, "test123")
+        XCTAssertEqual(result.timestamp, "ISO:1609459200")
+        XCTAssertEqual(result.score, "PERCENT:95.5")
+        
+        // 测试验证失败的情况
+        let invalidJson = """
+            {"id": "test456", "timestamp": 1609459200, "score": -10.0}
+            """.data(using: .utf8)!
+        
+        XCTAssertThrowsError(try decoder.decode(ComplexModel.self, from: invalidJson, configuration: config)) { error in
+            if let decodingError = error as? DecodingError,
+               case .dataCorrupted(let context) = decodingError {
+                XCTAssertEqual(context.debugDescription, "Score cannot be negative")
+            } else {
+                XCTFail("Expected DecodingError.dataCorrupted")
+            }
+        }
+    }
 }

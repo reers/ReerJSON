@@ -948,7 +948,8 @@ class ReerJSONTests: XCTestCase {
         XCTAssert(model4.c == [1, 2, 3])
     }
     
-    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    #if !os(Linux)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
     func testDecodableWithConfiguration() throws {
         
         struct DecodingConfig {
@@ -992,7 +993,7 @@ class ReerJSONTests: XCTestCase {
         XCTAssertEqual(result, foundationResult)
     }
     
-    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
     func testDecodableWithConfigurationProvider() throws {
         // 定义配置结构
         struct AppConfig {
@@ -1045,7 +1046,7 @@ class ReerJSONTests: XCTestCase {
         XCTAssertEqual(result, foundationResult)
     }
     
-    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
     func testDecodableWithConfigurationAndPath() throws {
         // 定义配置
         struct PathConfig {
@@ -1109,7 +1110,7 @@ class ReerJSONTests: XCTestCase {
         XCTAssertEqual(rootResult.active, false)
     }
     
-    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
     func testDecodableWithConfigurationArray() throws {
         // 定义配置
         struct ArrayConfig {
@@ -1164,7 +1165,7 @@ class ReerJSONTests: XCTestCase {
         }
     }
     
-    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
     func testDecodableWithConfigurationComplexTypes() throws {
         // 定义复杂配置
         struct ComplexConfig {
@@ -1232,4 +1233,5 @@ class ReerJSONTests: XCTestCase {
             }
         }
     }
+    #endif
 }

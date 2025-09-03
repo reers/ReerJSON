@@ -216,7 +216,8 @@ open class ReerJSONDecoder {
         )
     }
     
-    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    #if !os(Linux)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
     open func decode<T: DecodableWithConfiguration>(
         _ type: T.Type,
         from data: Data,
@@ -231,7 +232,14 @@ open class ReerJSONDecoder {
             )
         }
         guard let doc else {
-            return try decodeWithFoundationDecoder(type, from: data, configuration: configuration)
+            if #available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *) {
+                return try decodeWithFoundationDecoder(type, from: data, configuration: configuration)
+            } else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: [],
+                    debugDescription: "Read yyjson_doc failed."
+                ))
+            }
         }
         
         defer {
@@ -248,7 +256,7 @@ open class ReerJSONDecoder {
         return try impl.unbox(json, as: type, configuration: configuration, for: .root,  _CodingKey?.none)
     }
     
-    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
     open func decode<T, C>(
         _ type: T.Type,
         from data: Data,
@@ -260,6 +268,7 @@ open class ReerJSONDecoder {
           T.DecodingConfiguration == C.DecodingConfiguration {
         try decode(type, from: data, configuration: C.decodingConfiguration)
     }
+    #endif
     
     func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data) throws -> T {
         let decoder = Foundation.JSONDecoder()
@@ -271,6 +280,7 @@ open class ReerJSONDecoder {
         return try decoder.decode(type, from: data)
     }
     
+    #if !os(Linux)
     @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
     func decodeWithFoundationDecoder<T : DecodableWithConfiguration>(
         _ type: T.Type,
@@ -285,4 +295,5 @@ open class ReerJSONDecoder {
         decoder.userInfo = userInfo
         return try decoder.decode(type, from: data, configuration: configuration)
     }
+    #endif
 }

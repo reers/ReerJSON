@@ -14,7 +14,7 @@ Just replace `JSONDecoder` with `ReerJSONDecoder` wherever you want to use it. S
 
 # TODO
 * [x] Add GitHub workflow for CI.
-* [ ] Support `CodableWithConfiguration`.
+* [x] Support `CodableWithConfiguration`.
 * [ ] Support JSON5 decoding.
 * [ ] Implement ReerJSONEncoder.
 

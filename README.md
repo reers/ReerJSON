@@ -1,6 +1,9 @@
 # ReerJSON
 ## A faster version of JSONDecoder based on [yyjson](https://github.com/ibireme/yyjson)
 
+![Coverage: 88%](https://img.shields.io/static/v1?label=coverage&message=88%&color=brightgreen)
+[![SwiftPM compatible](https://img.shields.io/badge/SwiftPM-compatible%20%28iOS%29-brightgreen)](https://swift.org/package-manager/)
+
 ReerJSON is a really fast JSON parser, and it's inspired by [ZippyJSON](https://github.com/michaeleisel/ZippyJSON) and [Ananda](https://github.com/nixzhu/Ananda).
 
 > **⚠️Important:** When measuring the performance of Swift libraries, make sure you're building in **Release Mode**. 

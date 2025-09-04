@@ -937,16 +937,32 @@ class ReerJSONTests: XCTestCase {
             let homeAddress: Address
             let workInfo: WorkInfo
             
+            // 添加更多可选属性用于测试 decodeIfPresent
+            let middleName: String?
+            let alternateEmail: String?
+            let userScore: Int?
+            let isPremium: Bool?
+            let accountBalance: Double?
+            let lastLoginTime: Float?
+            let profilePicture: Data?
+            let websiteUrl: URL?
+            let birthDate: Date?
+            
             struct Address: Codable, Equatable {
                 let streetName: String
                 let cityName: String
                 let zipCode: String
+                let apartmentNumber: String?  // 可选属性
+                let buildingFloor: Int?       // 可选属性
             }
             
             struct WorkInfo: Codable, Equatable {
                 let companyName: String
                 let jobTitle: String
                 let startDate: String
+                let endDate: String?          // 可选属性
+                let monthlySalary: Double?    // 可选属性
+                let isRemote: Bool?           // 可选属性
             }
         }
         
@@ -961,17 +977,29 @@ class ReerJSONTests: XCTestCase {
             "home_address": {
                 "street_name": "Main St",
                 "city_name": "New York",
-                "zip_code": "10001"
+                "zip_code": "10001",
+                "apartment_number": "4B",
+                "building_floor": null
             },
             "work_info": {
                 "company_name": "Tech Corp",
                 "job_title": "Engineer",
-                "start_date": "2020-01-01"
-            }
+                "start_date": "2020-01-01",
+                "monthly_salary": 8500.50,
+                "is_remote": true
+            },
+            "middle_name": null,
+            "user_score": 95,
+            "is_premium": false,
+            "account_balance": 1250.75,
+            "last_login_time": 3.14159,
+            "profile_picture": "SGVsbG8gV29ybGQ=",
+            "website_url": "https://johndoe.dev",
+            "birth_date": 631152000
         }
         """
         
-        testRoundTrip(of: SnakeCaseTest.self, json: json, keyDecodingStrategy: .convertFromSnakeCase)
+        testRoundTrip(of: SnakeCaseTest.self, json: json, dateDecodingStrategy: .secondsSince1970, dataDecodingStrategy: .base64, keyDecodingStrategy: .convertFromSnakeCase)
     }
     
     func testPreTransformKeyedDecodingContainerCustomStrategy() {
@@ -981,11 +1009,29 @@ class ReerJSONTests: XCTestCase {
             let userAge: Int
             let isAdmin: Bool
             
+            // 添加可选属性测试 decodeIfPresent
+            let userNickname: String?
+            let userPhone: String?
+            let userScore: Int?
+            let isVerified: Bool?
+            let userRating: Double?
+            let lastSeen: Float?
+            let avatarData: Data?
+            let profileUrl: URL?
+            
             enum CodingKeys: String, CodingKey {
                 case userName = "user_name"
                 case userEmail = "user_email"
                 case userAge = "user_age"
                 case isAdmin = "is_admin"
+                case userNickname = "user_nickname"
+                case userPhone = "user_phone"
+                case userScore = "user_score"
+                case isVerified = "is_verified"
+                case userRating = "user_rating"
+                case lastSeen = "last_seen"
+                case avatarData = "avatar_data"
+                case profileUrl = "profile_url"
             }
         }
         
@@ -994,7 +1040,14 @@ class ReerJSONTests: XCTestCase {
             "USER_NAME": "alice",
             "USER_EMAIL": "alice@example.com",
             "USER_AGE": 25,
-            "IS_ADMIN": false
+            "IS_ADMIN": false,
+            "USER_NICKNAME": "Ali",
+            "USER_SCORE": 88,
+            "IS_VERIFIED": null,
+            "USER_RATING": 4.7,
+            "LAST_SEEN": 1.23,
+            "AVATAR_DATA": "dGVzdCBkYXRh",
+            "PROFILE_URL": "https://alice.dev"
         }
         """
         
@@ -1006,7 +1059,7 @@ class ReerJSONTests: XCTestCase {
             return _CodingKey(stringValue: lowerKey)!
         }
         
-        testRoundTrip(of: CustomKeyTest.self, json: json, keyDecodingStrategy: customStrategy)
+        testRoundTrip(of: CustomKeyTest.self, json: json, dataDecodingStrategy: .base64, keyDecodingStrategy: customStrategy)
     }
     
     func testPreTransformKeyedDecodingContainerCustomStrategyWithPath() {
@@ -1359,19 +1412,39 @@ class ReerJSONTests: XCTestCase {
             let floatValue: Float
             let doubleValue: Double
             
-            // Optional types
+            // Optional types for decodeIfPresent testing
             let optionalString: String?
             let optionalInt: Int?
             let optionalBool: Bool?
             
+            // Optional integer types
+            let optionalInt8: Int8?
+            let optionalInt16: Int16?
+            let optionalInt32: Int32?
+            let optionalInt64: Int64?
+            let optionalUInt: UInt?
+            let optionalUInt8: UInt8?
+            let optionalUInt16: UInt16?
+            let optionalUInt32: UInt32?
+            let optionalUInt64: UInt64?
+            
+            // Optional floating point types
+            let optionalFloat: Float?
+            let optionalDouble: Double?
+            
             // Collections
             let arrayValue: [String]
             let dictionaryValue: [String: Int]
+            let optionalArrayValue: [Int]?
+            let optionalDictionaryValue: [String: String]?
             
             // Special types
             let urlValue: URL
             let dateValue: Date
             let dataValue: Data
+            let optionalUrlValue: URL?
+            let optionalDateValue: Date?
+            let optionalDataValue: Data?
         }
         
         let json = """
@@ -1393,14 +1466,30 @@ class ReerJSONTests: XCTestCase {
             "optional_string": "optional_test",
             "optional_int": 123,
             "optional_bool": null,
+            "optional_int8": 100,
+            "optional_int16": null,
+            "optional_int32": 999999,
+            "optional_int64": 1234567890123456789,
+            "optional_u_int": null,
+            "optional_u_int8": 200,
+            "optional_u_int16": 50000,
+            "optional_u_int32": null,
+            "optional_u_int64": 9876543210987654321,
+            "optional_float": 2.718,
+            "optional_double": null,
             "array_value": ["item1", "item2", "item3"],
             "dictionary_value": {
                 "key1": 1,
                 "key2": 2
             },
+            "optional_array_value": [10, 20, 30],
+            "optional_dictionary_value": null,
             "url_value": "https://example.com",
             "date_value": 1609459200,
-            "data_value": "SGVsbG8gV29ybGQ="
+            "data_value": "SGVsbG8gV29ybGQ=",
+            "optional_url_value": "https://optional.example.com",
+            "optional_date_value": null,
+            "optional_data_value": "T3B0aW9uYWwgRGF0YQ=="
         }
         """
         
@@ -1499,6 +1588,35 @@ class ReerJSONTests: XCTestCase {
         XCTAssertEqual(result.urlValue, URL(string: "https://example.com")!)
         XCTAssertEqual(result.dateValue, Date(timeIntervalSince1970: 1609459200))
         XCTAssertEqual(result.dataValue, "Hello World".data(using: .utf8)!)
+        
+        // Verify optional values from decodeIfPresent
+        XCTAssertEqual(result.optionalString, "optional_test")
+        XCTAssertEqual(result.optionalInt, 123)
+        XCTAssertNil(result.optionalBool)
+        
+        // Verify optional integer types
+        XCTAssertEqual(result.optionalInt8, 100)
+        XCTAssertNil(result.optionalInt16)
+        XCTAssertEqual(result.optionalInt32, 999999)
+        XCTAssertEqual(result.optionalInt64, 1234567890123456789)
+        XCTAssertNil(result.optionalUInt)
+        XCTAssertEqual(result.optionalUInt8, 200)
+        XCTAssertEqual(result.optionalUInt16, 50000)
+        XCTAssertNil(result.optionalUInt32)
+        XCTAssertEqual(result.optionalUInt64, 9876543210987654321)
+        
+        // Verify optional floating point types
+        XCTAssertEqual(result.optionalFloat!, 2.718, accuracy: 0.001)
+        XCTAssertNil(result.optionalDouble)
+        
+        // Verify optional collections
+        XCTAssertEqual(result.optionalArrayValue, [10, 20, 30])
+        XCTAssertNil(result.optionalDictionaryValue)
+        
+        // Verify optional special types
+        XCTAssertEqual(result.optionalUrlValue, URL(string: "https://optional.example.com")!)
+        XCTAssertNil(result.optionalDateValue)
+        XCTAssertEqual(result.optionalDataValue, "Optional Data".data(using: .utf8)!)
     }
     
     func testPreTransformKeyedDecodingContainerDecodeIfPresent() {
@@ -1536,6 +1654,159 @@ class ReerJSONTests: XCTestCase {
         // Check null values (should be nil)
         XCTAssertNil(result.nullString)
         XCTAssertNil(result.nullInt)
+    }
+    
+    func testPreTransformKeyedDecodingContainerDecodeIfPresentEdgeCases() {
+        struct EdgeCaseTest: Codable, Equatable {
+            // 测试各种整数类型的 decodeIfPresent
+            let optInt8Present: Int8?
+            let optInt8Null: Int8?
+            let optInt8Missing: Int8?
+            
+            let optInt16Present: Int16?
+            let optInt16Null: Int16?
+            let optInt16Missing: Int16?
+            
+            let optInt32Present: Int32?
+            let optInt32Null: Int32?
+            let optInt32Missing: Int32?
+            
+            let optInt64Present: Int64?
+            let optInt64Null: Int64?
+            let optInt64Missing: Int64?
+            
+            let optUIntPresent: UInt?
+            let optUIntNull: UInt?
+            let optUIntMissing: UInt?
+            
+            let optUInt8Present: UInt8?
+            let optUInt8Null: UInt8?
+            let optUInt8Missing: UInt8?
+            
+            let optUInt16Present: UInt16?
+            let optUInt16Null: UInt16?
+            let optUInt16Missing: UInt16?
+            
+            let optUInt32Present: UInt32?
+            let optUInt32Null: UInt32?
+            let optUInt32Missing: UInt32?
+            
+            let optUInt64Present: UInt64?
+            let optUInt64Null: UInt64?
+            let optUInt64Missing: UInt64?
+            
+            // 测试浮点类型的 decodeIfPresent
+            let optFloatPresent: Float?
+            let optFloatNull: Float?
+            let optFloatMissing: Float?
+            
+            let optDoublePresent: Double?
+            let optDoubleNull: Double?
+            let optDoubleMissing: Double?
+            
+            // 测试布尔类型的 decodeIfPresent
+            let optBoolPresent: Bool?
+            let optBoolNull: Bool?
+            let optBoolMissing: Bool?
+            
+            // 测试字符串类型的 decodeIfPresent
+            let optStringPresent: String?
+            let optStringNull: String?
+            let optStringMissing: String?
+        }
+        
+        let json = """
+        {
+            "opt_int8_present": 127,
+            "opt_int8_null": null,
+            
+            "opt_int16_present": 32767,
+            "opt_int16_null": null,
+            
+            "opt_int32_present": 2147483647,
+            "opt_int32_null": null,
+            
+            "opt_int64_present": 9223372036854775807,
+            "opt_int64_null": null,
+            
+            "opt_u_int_present": 4294967295,
+            "opt_u_int_null": null,
+            
+            "opt_u_int8_present": 255,
+            "opt_u_int8_null": null,
+            
+            "opt_u_int16_present": 65535,
+            "opt_u_int16_null": null,
+            
+            "opt_u_int32_present": 4294967295,
+            "opt_u_int32_null": null,
+            
+            "opt_u_int64_present": 18446744073709551615,
+            "opt_u_int64_null": null,
+            
+            "opt_float_present": 3.14159,
+            "opt_float_null": null,
+            
+            "opt_double_present": 2.71828182846,
+            "opt_double_null": null,
+            
+            "opt_bool_present": true,
+            "opt_bool_null": null,
+            
+            "opt_string_present": "hello world",
+            "opt_string_null": null
+        }
+        """
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        let result = try! decoder.decode(EdgeCaseTest.self, from: json.data(using: .utf8)!)
+        
+        // 验证 present 值
+        XCTAssertEqual(result.optInt8Present, 127)
+        XCTAssertEqual(result.optInt16Present, 32767)
+        XCTAssertEqual(result.optInt32Present, 2147483647)
+        XCTAssertEqual(result.optInt64Present, 9223372036854775807)
+        XCTAssertEqual(result.optUIntPresent, 4294967295)
+        XCTAssertEqual(result.optUInt8Present, 255)
+        XCTAssertEqual(result.optUInt16Present, 65535)
+        XCTAssertEqual(result.optUInt32Present, 4294967295)
+        XCTAssertEqual(result.optUInt64Present, 18446744073709551615)
+        XCTAssertEqual(result.optFloatPresent!, 3.14159, accuracy: 0.00001)
+        XCTAssertEqual(result.optDoublePresent!, 2.71828182846, accuracy: 0.00000000001)
+        XCTAssertEqual(result.optBoolPresent, true)
+        XCTAssertEqual(result.optStringPresent, "hello world")
+        
+        // 验证 null 值
+        XCTAssertNil(result.optInt8Null)
+        XCTAssertNil(result.optInt16Null)
+        XCTAssertNil(result.optInt32Null)
+        XCTAssertNil(result.optInt64Null)
+        XCTAssertNil(result.optUIntNull)
+        XCTAssertNil(result.optUInt8Null)
+        XCTAssertNil(result.optUInt16Null)
+        XCTAssertNil(result.optUInt32Null)
+        XCTAssertNil(result.optUInt64Null)
+        XCTAssertNil(result.optFloatNull)
+        XCTAssertNil(result.optDoubleNull)
+        XCTAssertNil(result.optBoolNull)
+        XCTAssertNil(result.optStringNull)
+        
+        // 验证 missing 值
+        XCTAssertNil(result.optInt8Missing)
+        XCTAssertNil(result.optInt16Missing)
+        XCTAssertNil(result.optInt32Missing)
+        XCTAssertNil(result.optInt64Missing)
+        XCTAssertNil(result.optUIntMissing)
+        XCTAssertNil(result.optUInt8Missing)
+        XCTAssertNil(result.optUInt16Missing)
+        XCTAssertNil(result.optUInt32Missing)
+        XCTAssertNil(result.optUInt64Missing)
+        XCTAssertNil(result.optFloatMissing)
+        XCTAssertNil(result.optDoubleMissing)
+        XCTAssertNil(result.optBoolMissing)
+        XCTAssertNil(result.optStringMissing)
     }
     
     func testPreTransformKeyedDecodingContainerContains() {

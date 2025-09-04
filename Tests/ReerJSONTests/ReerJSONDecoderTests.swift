@@ -924,6 +924,693 @@ class ReerJSONTests: XCTestCase {
         run("twitterescaped", Twitter.self)
     }
     
+    // MARK: - PreTransformKeyedDecodingContainer Tests
+    
+    func testPreTransformKeyedDecodingContainerSnakeCase() {
+        struct SnakeCaseTest: Codable, Equatable {
+            let firstName: String
+            let lastName: String
+            let userAge: Int
+            let isActive: Bool
+            let phoneNumber: String?
+            let emailAddress: String
+            let homeAddress: Address
+            let workInfo: WorkInfo
+            
+            struct Address: Codable, Equatable {
+                let streetName: String
+                let cityName: String
+                let zipCode: String
+            }
+            
+            struct WorkInfo: Codable, Equatable {
+                let companyName: String
+                let jobTitle: String
+                let startDate: String
+            }
+        }
+        
+        let json = """
+        {
+            "first_name": "John",
+            "last_name": "Doe",
+            "user_age": 30,
+            "is_active": true,
+            "phone_number": "123-456-7890",
+            "email_address": "john@example.com",
+            "home_address": {
+                "street_name": "Main St",
+                "city_name": "New York",
+                "zip_code": "10001"
+            },
+            "work_info": {
+                "company_name": "Tech Corp",
+                "job_title": "Engineer",
+                "start_date": "2020-01-01"
+            }
+        }
+        """
+        
+        testRoundTrip(of: SnakeCaseTest.self, json: json, keyDecodingStrategy: .convertFromSnakeCase)
+    }
+    
+    func testPreTransformKeyedDecodingContainerCustomStrategy() {
+        struct CustomKeyTest: Codable, Equatable {
+            let userName: String
+            let userEmail: String
+            let userAge: Int
+            let isAdmin: Bool
+            
+            enum CodingKeys: String, CodingKey {
+                case userName = "user_name"
+                case userEmail = "user_email"
+                case userAge = "user_age"
+                case isAdmin = "is_admin"
+            }
+        }
+        
+        let json = """
+        {
+            "USER_NAME": "alice",
+            "USER_EMAIL": "alice@example.com",
+            "USER_AGE": 25,
+            "IS_ADMIN": false
+        }
+        """
+        
+        // Custom strategy: convert UPPER_CASE to snake_case
+        let customStrategy: JSONDecoder.KeyDecodingStrategy = .custom { keys in
+            let key = keys.last!
+            let upperKey = key.stringValue
+            let lowerKey = upperKey.lowercased()
+            return _CodingKey(stringValue: lowerKey)!
+        }
+        
+        testRoundTrip(of: CustomKeyTest.self, json: json, keyDecodingStrategy: customStrategy)
+    }
+    
+    func testPreTransformKeyedDecodingContainerCustomStrategyWithPath() {
+        struct PathTest: Codable, Equatable {
+            let value: String
+            let nested: NestedData
+            
+            struct NestedData: Codable, Equatable {
+                let innerValue: String
+            }
+        }
+        
+        let json = """
+        {
+            "VALUE": "test",
+            "NESTED": {
+                "INNER_VALUE": "nested_test"
+            }
+        }
+        """
+        
+        // Custom strategy that converts all keys to lowercase and handles underscores
+        let customStrategy: JSONDecoder.KeyDecodingStrategy = .custom { keys in
+            let key = keys.last!
+            let originalKey = key.stringValue
+            
+            // Always convert to lowercase first, then handle underscores
+            let lowerKey = originalKey.lowercased()
+            let components = lowerKey.split(separator: "_")
+            if components.count > 1 {
+                let camelCase = String(components[0]) + components[1...].map { $0.capitalized }.joined()
+                return _CodingKey(stringValue: camelCase)!
+            }
+            return _CodingKey(stringValue: lowerKey)!
+        }
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = customStrategy
+        
+        let result = try! decoder.decode(PathTest.self, from: json.data(using: .utf8)!)
+        XCTAssertEqual(result.value, "test")
+        XCTAssertEqual(result.nested.innerValue, "nested_test")
+    }
+    
+    func testPreTransformKeyedDecodingContainerErrorHandling() {
+        struct ErrorTest: Codable, Equatable {
+            let requiredField: String
+            let optionalField: String?
+        }
+        
+        // Test missing required key
+        let missingKeyJson = """
+        {
+            "optional_field": "present"
+        }
+        """
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        do {
+            let _ = try decoder.decode(ErrorTest.self, from: missingKeyJson.data(using: .utf8)!)
+            XCTFail("Should have thrown an error for missing required key")
+        } catch let error as DecodingError {
+            if case .keyNotFound(let key, let context) = error {
+                XCTAssertEqual(key.stringValue, "requiredField")
+                XCTAssertTrue(context.debugDescription.contains("requiredField"))
+            } else {
+                XCTFail("Expected keyNotFound error, got \(error)")
+            }
+        } catch {
+            XCTFail("Expected DecodingError, got \(error)")
+        }
+        
+        // Test type mismatch
+        let typeMismatchJson = """
+        {
+            "required_field": 123,
+            "optional_field": "valid"
+        }
+        """
+        
+        do {
+            let _ = try decoder.decode(ErrorTest.self, from: typeMismatchJson.data(using: .utf8)!)
+            XCTFail("Should have thrown an error for type mismatch")
+        } catch let error as DecodingError {
+            if case .typeMismatch(let type, let context) = error {
+                XCTAssertTrue(type == String.self)
+                XCTAssertEqual(context.codingPath.first?.stringValue, "requiredField")
+            } else {
+                XCTFail("Expected typeMismatch error, got \(error)")
+            }
+        } catch {
+            XCTFail("Expected DecodingError, got \(error)")
+        }
+    }
+    
+    func testPreTransformKeyedDecodingContainerNullHandling() {
+        struct NullTest: Codable, Equatable {
+            let requiredField: String
+            let optionalField: String?
+            let explicitNull: String?
+        }
+        
+        let nullJson = """
+        {
+            "required_field": "value",
+            "optional_field": null,
+            "explicit_null": null
+        }
+        """
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        let result = try! decoder.decode(NullTest.self, from: nullJson.data(using: .utf8)!)
+        XCTAssertEqual(result.requiredField, "value")
+        XCTAssertNil(result.optionalField)
+        XCTAssertNil(result.explicitNull)
+        
+        // Test decodeNil
+        struct NilCheckTest: Codable, Equatable {
+            let value: String?
+            
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                if try container.decodeNil(forKey: .value) {
+                    self.value = nil
+                } else {
+                    self.value = try container.decode(String.self, forKey: .value)
+                }
+            }
+            
+            enum CodingKeys: String, CodingKey {
+                case value
+            }
+        }
+        
+        let nilCheckJson = """
+        {
+            "value": null
+        }
+        """
+        
+        let nilResult = try! decoder.decode(NilCheckTest.self, from: nilCheckJson.data(using: .utf8)!)
+        XCTAssertNil(nilResult.value)
+    }
+    
+    func testPreTransformKeyedDecodingContainerNestedContainers() {
+        struct NestedTest: Codable, Equatable {
+            let userInfo: UserInfo
+            let preferences: [String]
+            let metadata: [String: String]
+            
+            struct UserInfo: Codable, Equatable {
+                let personalData: PersonalData
+                let workData: WorkData
+                
+                struct PersonalData: Codable, Equatable {
+                    let fullName: String
+                    let birthDate: String
+                }
+                
+                struct WorkData: Codable, Equatable {
+                    let companyName: String
+                    let jobTitle: String
+                }
+            }
+            
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                
+                // Test nested keyed container
+                self.userInfo = try container.decode(UserInfo.self, forKey: .userInfo)
+                
+                // Test nested unkeyed container
+                var prefsContainer = try container.nestedUnkeyedContainer(forKey: .preferences)
+                var preferences: [String] = []
+                while !prefsContainer.isAtEnd {
+                    preferences.append(try prefsContainer.decode(String.self))
+                }
+                self.preferences = preferences
+                
+                // Test nested keyed container for dictionary
+                let metadataContainer = try container.nestedContainer(keyedBy: _CodingKey.self, forKey: .metadata)
+                var metadata: [String: String] = [:]
+                for key in metadataContainer.allKeys {
+                    metadata[key.stringValue] = try metadataContainer.decode(String.self, forKey: key)
+                }
+                self.metadata = metadata
+            }
+        }
+        
+        let json = """
+        {
+            "user_info": {
+                "personal_data": {
+                    "full_name": "John Doe",
+                    "birth_date": "1990-01-01"
+                },
+                "work_data": {
+                    "company_name": "Tech Corp",
+                    "job_title": "Engineer"
+                }
+            },
+            "preferences": ["dark_mode", "notifications", "auto_save"],
+            "metadata": {
+                "lastUpdated": "system",
+                "createdBy": "2024-01-01"
+            }
+        }
+        """
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        let result = try! decoder.decode(NestedTest.self, from: json.data(using: .utf8)!)
+        
+        XCTAssertEqual(result.userInfo.personalData.fullName, "John Doe")
+        XCTAssertEqual(result.userInfo.personalData.birthDate, "1990-01-01")
+        XCTAssertEqual(result.userInfo.workData.companyName, "Tech Corp")
+        XCTAssertEqual(result.userInfo.workData.jobTitle, "Engineer")
+        XCTAssertEqual(result.preferences, ["dark_mode", "notifications", "auto_save"])
+        XCTAssertEqual(result.metadata["lastUpdated"], "system")
+        XCTAssertEqual(result.metadata["createdBy"], "2024-01-01")
+    }
+    
+    func testPreTransformKeyedDecodingContainerSuperDecoder() {
+        struct SuperDecoderTest: Codable, Equatable {
+            let normalField: String
+            let superData: SuperData
+            
+            struct SuperData: Codable, Equatable {
+                let value: String
+            }
+            
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.normalField = try container.decode(String.self, forKey: .normalField)
+                
+                // Test superDecoder
+                let superDecoder = try container.superDecoder()
+                self.superData = try SuperData(from: superDecoder)
+            }
+            
+        }
+        
+        let json = """
+        {
+            "normal_field": "normal_value",
+            "super": {
+                "value": "super_value"
+            }
+        }
+        """
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        let result = try! decoder.decode(SuperDecoderTest.self, from: json.data(using: .utf8)!)
+        XCTAssertEqual(result.normalField, "normal_value")
+        XCTAssertEqual(result.superData.value, "super_value")
+        
+        // Test superDecoder(forKey:)
+        struct CustomSuperDecoderTest: Codable, Equatable {
+            let normalField: String
+            let customSuperData: SuperData
+            
+            struct SuperData: Codable, Equatable {
+                let value: String
+            }
+            
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.normalField = try container.decode(String.self, forKey: .normalField)
+                
+                // Test superDecoder(forKey:)
+                let superDecoder = try container.superDecoder(forKey: .customSuperData)
+                self.customSuperData = try SuperData(from: superDecoder)
+            }
+        }
+        
+        let customSuperJson = """
+        {
+            "normal_field": "normal_value",
+            "custom_super_data": {
+                "value": "custom_super_value"
+            }
+        }
+        """
+        
+        let customResult = try! decoder.decode(CustomSuperDecoderTest.self, from: customSuperJson.data(using: .utf8)!)
+        XCTAssertEqual(customResult.normalField, "normal_value")
+        XCTAssertEqual(customResult.customSuperData.value, "custom_super_value")
+    }
+    
+    func testPreTransformKeyedDecodingContainerAllDataTypes() {
+        #if compiler(>=6.0)
+        @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+        struct AllTypesTestWithInt128: Codable, Equatable {
+            // Basic types
+            let boolValue: Bool
+            let stringValue: String
+            let intValue: Int
+            let int8Value: Int8
+            let int16Value: Int16
+            let int32Value: Int32
+            let int64Value: Int64
+            let uintValue: UInt
+            let uint8Value: UInt8
+            let uint16Value: UInt16
+            let uint32Value: UInt32
+            let uint64Value: UInt64
+            let floatValue: Float
+            let doubleValue: Double
+            
+            // Optional types
+            let optionalString: String?
+            let optionalInt: Int?
+            let optionalBool: Bool?
+            
+            // Collections
+            let arrayValue: [String]
+            let dictionaryValue: [String: Int]
+            
+            // Special types
+            let urlValue: URL
+            let dateValue: Date
+            let dataValue: Data
+            
+            let int128Value: Int128?
+            let uint128Value: UInt128?
+        }
+        #endif
+        
+        struct AllTypesTest: Codable, Equatable {
+            // Basic types
+            let boolValue: Bool
+            let stringValue: String
+            let intValue: Int
+            let int8Value: Int8
+            let int16Value: Int16
+            let int32Value: Int32
+            let int64Value: Int64
+            let uintValue: UInt
+            let uint8Value: UInt8
+            let uint16Value: UInt16
+            let uint32Value: UInt32
+            let uint64Value: UInt64
+            let floatValue: Float
+            let doubleValue: Double
+            
+            // Optional types
+            let optionalString: String?
+            let optionalInt: Int?
+            let optionalBool: Bool?
+            
+            // Collections
+            let arrayValue: [String]
+            let dictionaryValue: [String: Int]
+            
+            // Special types
+            let urlValue: URL
+            let dateValue: Date
+            let dataValue: Data
+        }
+        
+        let json = """
+        {
+            "bool_value": true,
+            "string_value": "test_string",
+            "int_value": 42,
+            "int8_value": 127,
+            "int16_value": 32767,
+            "int32_value": 2147483647,
+            "int64_value": 9223372036854775807,
+            "uint_value": 4294967295,
+            "uint8_value": 255,
+            "uint16_value": 65535,
+            "uint32_value": 4294967295,
+            "uint64_value": 18446744073709551615,
+            "float_value": 3.14159,
+            "double_value": 2.71828182846,
+            "optional_string": "optional_test",
+            "optional_int": 123,
+            "optional_bool": null,
+            "array_value": ["item1", "item2", "item3"],
+            "dictionary_value": {
+                "key1": 1,
+                "key2": 2
+            },
+            "url_value": "https://example.com",
+            "date_value": 1609459200,
+            "data_value": "SGVsbG8gV29ybGQ="
+        }
+        """
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .secondsSince1970
+        decoder.dataDecodingStrategy = .base64
+        
+        #if compiler(>=6.0)
+        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *) {
+            let jsonWithInt128 = """
+            {
+                "bool_value": true,
+                "string_value": "test_string",
+                "int_value": 42,
+                "int8_value": 127,
+                "int16_value": 32767,
+                "int32_value": 2147483647,
+                "int64_value": 9223372036854775807,
+                "uint_value": 4294967295,
+                "uint8_value": 255,
+                "uint16_value": 65535,
+                "uint32_value": 4294967295,
+                "uint64_value": 18446744073709551615,
+                "float_value": 3.14159,
+                "double_value": 2.71828182846,
+                "optional_string": "optional_test",
+                "optional_int": 123,
+                "optional_bool": null,
+                "array_value": ["item1", "item2", "item3"],
+                "dictionary_value": {
+                    "key1": 1,
+                    "key2": 2
+                },
+                "url_value": "https://example.com",
+                "date_value": 1609459200,
+                "data_value": "SGVsbG8gV29ybGQ=",
+                "decimal_value": "123.456",
+                "int128_value": 170141183460469231731687303715884105727,
+                "uint128_value": 340282366920938463463374607431768211455
+            }
+            """
+            
+            let resultWithInt128 = try! decoder.decode(AllTypesTestWithInt128.self, from: jsonWithInt128.data(using: .utf8)!)
+            
+            // Verify all values
+            XCTAssertEqual(resultWithInt128.boolValue, true)
+            XCTAssertEqual(resultWithInt128.stringValue, "test_string")
+            XCTAssertEqual(resultWithInt128.intValue, 42)
+            XCTAssertEqual(resultWithInt128.int8Value, 127)
+            XCTAssertEqual(resultWithInt128.int16Value, 32767)
+            XCTAssertEqual(resultWithInt128.int32Value, 2147483647)
+            XCTAssertEqual(resultWithInt128.int64Value, 9223372036854775807)
+            XCTAssertEqual(resultWithInt128.uintValue, 4294967295)
+            XCTAssertEqual(resultWithInt128.uint8Value, 255)
+            XCTAssertEqual(resultWithInt128.uint16Value, 65535)
+            XCTAssertEqual(resultWithInt128.uint32Value, 4294967295)
+            XCTAssertEqual(resultWithInt128.uint64Value, 18446744073709551615)
+            XCTAssertEqual(resultWithInt128.floatValue, 3.14159, accuracy: 0.00001)
+            XCTAssertEqual(resultWithInt128.doubleValue, 2.71828182846, accuracy: 0.00000000001)
+            XCTAssertEqual(resultWithInt128.optionalString, "optional_test")
+            XCTAssertEqual(resultWithInt128.optionalInt, 123)
+            XCTAssertNil(resultWithInt128.optionalBool)
+            XCTAssertEqual(resultWithInt128.arrayValue, ["item1", "item2", "item3"])
+            XCTAssertEqual(resultWithInt128.dictionaryValue, ["key1": 1, "key2": 2])
+            XCTAssertEqual(resultWithInt128.urlValue, URL(string: "https://example.com")!)
+            XCTAssertEqual(resultWithInt128.dateValue, Date(timeIntervalSince1970: 1609459200))
+            XCTAssertEqual(resultWithInt128.dataValue, "Hello World".data(using: .utf8)!)
+            XCTAssertEqual(resultWithInt128.int128Value, 170141183460469231731687303715884105727)
+            XCTAssertEqual(resultWithInt128.uint128Value, 340282366920938463463374607431768211455)
+        }
+        #endif
+        
+        let result = try! decoder.decode(AllTypesTest.self, from: json.data(using: .utf8)!)
+        
+        // Verify all values
+        XCTAssertEqual(result.boolValue, true)
+        XCTAssertEqual(result.stringValue, "test_string")
+        XCTAssertEqual(result.intValue, 42)
+        XCTAssertEqual(result.int8Value, 127)
+        XCTAssertEqual(result.int16Value, 32767)
+        XCTAssertEqual(result.int32Value, 2147483647)
+        XCTAssertEqual(result.int64Value, 9223372036854775807)
+        XCTAssertEqual(result.uintValue, 4294967295)
+        XCTAssertEqual(result.uint8Value, 255)
+        XCTAssertEqual(result.uint16Value, 65535)
+        XCTAssertEqual(result.uint32Value, 4294967295)
+        XCTAssertEqual(result.uint64Value, 18446744073709551615)
+        XCTAssertEqual(result.floatValue, 3.14159, accuracy: 0.00001)
+        XCTAssertEqual(result.doubleValue, 2.71828182846, accuracy: 0.00000000001)
+        XCTAssertEqual(result.optionalString, "optional_test")
+        XCTAssertEqual(result.optionalInt, 123)
+        XCTAssertNil(result.optionalBool)
+        XCTAssertEqual(result.arrayValue, ["item1", "item2", "item3"])
+        XCTAssertEqual(result.dictionaryValue, ["key1": 1, "key2": 2])
+        XCTAssertEqual(result.urlValue, URL(string: "https://example.com")!)
+        XCTAssertEqual(result.dateValue, Date(timeIntervalSince1970: 1609459200))
+        XCTAssertEqual(result.dataValue, "Hello World".data(using: .utf8)!)
+    }
+    
+    func testPreTransformKeyedDecodingContainerDecodeIfPresent() {
+        struct DecodeIfPresentTest: Codable, Equatable {
+            let presentString: String?
+            let missingString: String?
+            let nullString: String?
+            let presentInt: Int?
+            let missingInt: Int?
+            let nullInt: Int?
+        }
+        
+        let json = """
+        {
+            "present_string": "value",
+            "null_string": null,
+            "present_int": 42,
+            "null_int": null
+        }
+        """
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        let result = try! decoder.decode(DecodeIfPresentTest.self, from: json.data(using: .utf8)!)
+        
+        // Check present values
+        XCTAssertEqual(result.presentString, "value")
+        XCTAssertEqual(result.presentInt, 42)
+        
+        // Check missing values (should be nil)
+        XCTAssertNil(result.missingString)
+        XCTAssertNil(result.missingInt)
+        
+        // Check null values (should be nil)
+        XCTAssertNil(result.nullString)
+        XCTAssertNil(result.nullInt)
+    }
+    
+    func testPreTransformKeyedDecodingContainerContains() {
+        struct ContainsTest: Codable, Equatable {
+            let value: String
+            let existingKey: String?
+            
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                
+                // Test contains method - note: keys are transformed by snake_case strategy
+                XCTAssertTrue(container.contains(.value))
+                XCTAssertTrue(container.contains(.existingKey))  // existing_key -> existingKey
+                XCTAssertFalse(container.contains(.missingKey))
+                
+                self.value = try container.decode(String.self, forKey: .value)
+                self.existingKey = try container.decodeIfPresent(String.self, forKey: .existingKey)
+            }
+            
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(value, forKey: .value)
+                try container.encodeIfPresent(existingKey, forKey: .existingKey)
+            }
+            
+            enum CodingKeys: String, CodingKey {
+                case value
+                case existingKey
+                case missingKey
+            }
+        }
+        
+        let json = """
+        {
+            "value": "test",
+            "existing_key": "exists"
+        }
+        """
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        let result = try! decoder.decode(ContainsTest.self, from: json.data(using: .utf8)!)
+        XCTAssertEqual(result.value, "test")
+        XCTAssertEqual(result.existingKey, "exists")
+    }
+    
+    func testPreTransformKeyedDecodingContainerAllKeys() {
+        struct AllKeysTest: Codable, Equatable {
+            let keys: [String]
+            
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: _CodingKey.self)
+                
+                // Test allKeys property
+                let allKeys = container.allKeys
+                self.keys = allKeys.map { $0.stringValue }.sorted()
+            }
+        }
+        
+        let json = """
+        {
+            "first_key": "value1",
+            "second_key": "value2",
+            "third_key": "value3"
+        }
+        """
+        
+        let decoder = ReerJSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        let result = try! decoder.decode(AllKeysTest.self, from: json.data(using: .utf8)!)
+        XCTAssertEqual(result.keys.sorted(), ["firstKey", "secondKey", "thirdKey"])
+    }
+    
     func testPath() throws {
         struct Test: Decodable {
             let c: String

@@ -170,13 +170,17 @@ open class ReerJSONDecoder {
     ///
     /// - parameter type: The type of the value to decode.
     /// - parameter data: The data to decode from.
-    /// - parameter path: The decoding container path.
+    /// - parameter path: The decoding container path, `["user", "info"]`
     /// - returns: A value of the requested type.
     /// - throws: `DecodingError.dataCorrupted` if values requested from the payload are corrupted, or if the given data is not valid JSON.
     /// - throws: An error if any value throws an error during decoding.
     open func decode<T: Decodable>(_ type: T.Type, from data: Data, path: [String] = []) throws -> T {
         let doc = data.withUnsafeBytes {
-            yyjson_read($0.bindMemory(to: CChar.self).baseAddress, data.count, YYJSON_READ_NUMBER_AS_RAW)
+            yyjson_read(
+                $0.bindMemory(to: CChar.self).baseAddress,
+                data.count,
+                YYJSON_READ_NUMBER_AS_RAW
+            )
         }
         guard let doc else {
             return try decodeWithFoundationDecoder(type, from: data)
@@ -200,20 +204,42 @@ open class ReerJSONDecoder {
     ///
     /// - parameter type: The type of the value to decode.
     /// - parameter data: The data to decode from.
-    /// - parameter keyPath: The decoding container path, "user.info".
+    /// - parameter path: The decoding container path, `"user.info"`
     /// - returns: A value of the requested type.
     /// - throws: `DecodingError.dataCorrupted` if values requested from the payload are corrupted, or if the given data is not valid JSON.
     /// - throws: An error if any value throws an error during decoding.
-    open func decode<T: Decodable>(_ type: T.Type, from data: Data, keyPath: String) throws -> T {
+    open func decode<T: Decodable>(_ type: T.Type, from data: Data, path: String) throws -> T {
+        return try decode(
+            type,
+            from: data,
+            path: path.components(separatedBy: CharacterSet(charactersIn: "."))
+        )
+    }
+    
+    #if !os(Linux)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
+    open func decode<T: DecodableWithConfiguration>(
+        _ type: T.Type,
+        from data: Data,
+        path: [String] = [],
+        configuration: T.DecodingConfiguration
+    ) throws -> T {
         let doc = data.withUnsafeBytes {
             yyjson_read(
                 $0.bindMemory(to: CChar.self).baseAddress,
                 data.count,
-                YYJSON_READ_NUMBER_AS_RAW | YYJSON_READ_JSON5
+                YYJSON_READ_NUMBER_AS_RAW
             )
         }
         guard let doc else {
-            return try decodeWithFoundationDecoder(type, from: data)
+            if #available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *) {
+                return try decodeWithFoundationDecoder(type, from: data, configuration: configuration)
+            } else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: [],
+                    debugDescription: "Read yyjson_doc failed."
+                ))
+            }
         }
         
         defer {
@@ -221,14 +247,28 @@ open class ReerJSONDecoder {
         }
         
         var pointer = yyjson_doc_get_root(doc)
-        for key in keyPath.components(separatedBy: CharacterSet(charactersIn: ".")) {
+        for key in path {
             pointer = key.withCString { yyjson_obj_get(pointer, $0) }
         }
         
         let json = JSON(pointer: pointer)
         let impl = JSONDecoderImpl(json: json, userInfo: userInfo, codingPathNode: .root, options: options)
-        return try impl.unbox(json, as: type, for: .root, _CodingKey?.none)
+        return try impl.unbox(json, as: type, configuration: configuration, for: .root,  _CodingKey?.none)
     }
+    
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
+    open func decode<T, C>(
+        _ type: T.Type,
+        from data: Data,
+        path: [String] = [],
+        configuration: C.Type
+    ) throws -> T
+    where T: DecodableWithConfiguration,
+          C: DecodingConfigurationProviding,
+          T.DecodingConfiguration == C.DecodingConfiguration {
+        try decode(type, from: data, configuration: C.decodingConfiguration)
+    }
+    #endif
     
     func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data) throws -> T {
         let decoder = Foundation.JSONDecoder()
@@ -239,4 +279,21 @@ open class ReerJSONDecoder {
         decoder.userInfo = userInfo
         return try decoder.decode(type, from: data)
     }
+    
+    #if !os(Linux)
+    @available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *)
+    func decodeWithFoundationDecoder<T : DecodableWithConfiguration>(
+        _ type: T.Type,
+        from data: Data,
+        configuration: T.DecodingConfiguration
+    ) throws -> T {
+        let decoder = Foundation.JSONDecoder()
+        decoder.dataDecodingStrategy = dataDecodingStrategy
+        decoder.dateDecodingStrategy = dateDecodingStrategy
+        decoder.keyDecodingStrategy = keyDecodingStrategy
+        decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
+        decoder.userInfo = userInfo
+        return try decoder.decode(type, from: data, configuration: configuration)
+    }
+    #endif
 }

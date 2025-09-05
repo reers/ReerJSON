@@ -7,7 +7,7 @@ import PackageDescription
 let packageDependencies: [Package.Dependency] = [
     .package(
         url: "https://github.com/ibireme/yyjson.git",
-        from: "0.11.1"
+        from: "0.12.0"
     ),
 ]
 #else
@@ -46,9 +46,9 @@ let targetDependencies: [Target.Dependency] = [
 let package = Package(
     name: "ReerJSON",
     platforms: [
-        .macOS(.v10_15),
-        .iOS(.v13),
-        .tvOS(.v13),
+        .macOS(.v10_13),
+        .iOS(.v12),
+        .tvOS(.v12),
         .watchOS(.v6),
         .macCatalyst(.v13),
         .visionOS(.v1)

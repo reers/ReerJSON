@@ -1480,6 +1480,8 @@ private extension JSONDecoder.KeyDecodingStrategy {
             return true
         case .convertFromSnakeCase, .custom:
             return false
+        @unknown default:
+            return false
         }
     }
 }

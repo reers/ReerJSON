@@ -1267,12 +1267,15 @@ private struct JSONEncoderTests {
     @Test func topLevelFragmentsWithGarbage() {
         _checkExpectedThrownDataCorruptionUnderlyingError(contains: "Unexpected character") {
             let _ = try JSONDecoder().decode(Bool.self, from: "tru_".data(using: .utf8)!)
+            let _ = try json5Decoder.decode(Bool.self, from: "tru_".data(using: .utf8)!)
         }
         _checkExpectedThrownDataCorruptionUnderlyingError(contains: "Unexpected character") {
             let _ = try JSONDecoder().decode(Bool.self, from: "fals_".data(using: .utf8)!)
+            let _ = try json5Decoder.decode(Bool.self, from: "fals_".data(using: .utf8)!)
         }
         _checkExpectedThrownDataCorruptionUnderlyingError(contains: "Unexpected character") {
             let _ = try JSONDecoder().decode(Bool?.self, from: "nul_".data(using: .utf8)!)
+            let _ = try json5Decoder.decode(Bool?.self, from: "nul_".data(using: .utf8)!)
         }
     }
 
@@ -1911,6 +1914,368 @@ private struct JSONEncoderTests {
 
 // MARK: - SnakeCase Tests
 extension JSONEncoderTests {
+    var json5Decoder: ReerJSONDecoder {
+        let decoder = ReerJSONDecoder()
+        decoder.allowsJSON5 = true
+        return decoder
+    }
+
+    @Test func json5Numbers() {
+        let decoder = json5Decoder
+
+        let successfulIntegers: [(String,Int)] = [
+            ("1", 1),
+            ("11", 11),
+            ("99887766", 99887766),
+            ("-1", -1),
+            ("-10", -10),
+            ("0", 0),
+            ("+0", +0),
+            ("-0", -0),
+            ("+1", +1),
+            ("+10", +10),
+            ("0x1F", 0x1F), //
+            ("0x0000000E", 0xE),//
+            ("-0X1f", -0x1f),//
+            ("+0X1f", +0x1f),
+            ("1.", 1),
+            ("1.e2", 100),
+            ("1e2", 100),
+            ("1E2", 100),
+            ("1e+2", 100),
+            ("1E+2", 100),
+            ("1e+02", 100),
+            ("1E+02", 100),
+        ]
+        for (json, expected) in successfulIntegers {
+            #expect(throws: Never.self, "Error when parsing input \"\(json)\"") {
+                let val = try decoder.decode(Int.self, from: json.data(using: .utf8)!)
+                #expect(val == expected, "Wrong value parsed from input \"\(json)\"")
+            }
+        }
+
+        let successfulDoubles: [(String,Double)] = [
+            ("1", 1),
+            ("11", 11),
+            ("99887766", 99887766),
+            ("-1", -1),
+            ("-10", -10),
+            ("0", 0),
+            ("+0", +0),
+            ("-0", -0),
+            ("+1", +1),
+            ("+10", +10),
+            ("Infinity", Double.infinity),
+            ("-Infinity", -Double.infinity),
+            ("+Infinity", Double.infinity),
+            ("-NaN", -Double.nan),
+            ("+NaN", Double.nan),
+            ("NaN", Double.nan),
+            (".1", 0.1),
+            ("1.", 1.0),
+            ("-.1", -0.1),
+            ("+.1", +0.1),
+            ("1e-2", 1e-2),
+            ("1E-2", 1E-2),
+            ("1e-02", 1e-02),
+            ("1E-02", 1E-02),
+            ("1e2", 1e2),
+            ("1E2", 1E2),
+            ("1e+2", 1e+2),
+            ("1E+2", 1E+2),
+            ("1e+02", 1e+02),
+            ("1E+02", 1E+02),
+            ("0x1F", Double(0x1F)),
+            ("-0X1f", Double(-0x1f)),
+            ("+0X1f", Double(+0x1f)),
+        ]
+        for (json, expected) in successfulDoubles {
+            #expect(throws: Never.self, "Error when parsing input \"\(json)\"") {
+                let val = try decoder.decode(Double.self, from: json.data(using: .utf8)!)
+                if expected.isNaN {
+                    #expect(val.isNaN, "Wrong value \(val) parsed from input \"\(json)\"")
+                } else {
+                    #expect(val == expected, "Wrong value parsed from input \"\(json)\"")
+                }
+            }
+        }
+
+        let unsuccessfulIntegers = [
+            "-", // single -
+            "+", // single +
+            "-a", // - followed by non-digit
+            "+a", // + followed by non-digit
+            "-0x",
+            "+0x",
+            "-0x ",
+            "+0x ",
+            "-0xAFFFFFAFFFFFAFFFFFAFFFFFAFFFFFAFFFFFAFFFFFAFFFFF",
+            "0xABC.DEF",
+            "0xABCpD",
+            "1e",
+            "1E",
+            "1e ",
+            "1E ",
+            "+1e ",
+            "+1e",
+            "-1e ",
+            "-1E ",
+        ]
+        for json in unsuccessfulIntegers {
+            #expect(throws: (any Error).self, "Expected failure for input \"\(json)\"") {
+                try decoder.decode(Int.self, from: json.data(using: .utf8)!)
+            }
+        }
+
+        let unsuccessfulDoubles = [
+            "-Inf",
+            "-Inf       ",
+            "+Inf",
+            "+Inf       ",
+            "+Na",
+            "+Na    ",
+            "-Na",
+            "-Na    ",
+            "-infinity",
+            "-infinity       ",
+            "+infinity",
+            "+infinity       ",
+            "+NAN",
+            "+NA    ",
+            "-NA",
+            "-NA    ",
+            "-NAN",
+            "-NAN    ",
+            "0x2.",
+            "0x2.2",
+            ".e1",
+            "0xFFFFFFFFFFFFFFFFFFFFFF",
+        ];
+        for json in unsuccessfulDoubles {
+            #expect(throws: (any Error).self, "Expected failure for input \"\(json)\"") {
+                try decoder.decode(Double.self, from: json.data(using: .utf8)!)
+            }
+        }
+    }
+
+    @Test func json5Null() {
+        let validJSON = "null"
+        let invalidJSON = [
+            "Null",
+            "nul",
+            "nu",
+            "n",
+            "n    ",
+            "nu   "
+        ]
+
+        #expect(throws: Never.self) {
+            try json5Decoder.decode(NullReader.self, from: validJSON.data(using: .utf8)!)
+        }
+
+        for json in invalidJSON {
+            #expect(throws: (any Error).self, "Expected failure while decoding input \"\(json)\"") {
+                try json5Decoder.decode(NullReader.self, from: json.data(using: .utf8)!)
+            }
+        }
+    }
+
+    @Test func json5EsotericErrors() {
+        // All of the following should fail
+        let arrayStrings = [
+            "[",
+            "[ ",
+            "[\n\n",
+            "['hi',",
+            "['hi', ",
+            "['hi',\n"
+        ]
+        let objectStrings = [
+            "{",
+            "{ ",
+            "{k ",
+            "{k :",
+            "{k : ",
+            "{k : true",
+            "{k : true ",
+            "{k : true\n\n",
+            "{k : true  ",
+            "{k : true   ",
+        ]
+        let objectCharacterArrays: [[UInt8]] = [
+            [.init(ascii: "{"), 0x80],  // Invalid UTF-8: Unexpected continuation byte
+            [.init(ascii: "{"), 0xc0],  // Invalid UTF-8: Initial byte of 2-byte sequence without continuation
+            [.init(ascii: "{"), 0xe0, 0x80],  // Invalid UTF-8: Initial byte of 3-byte sequence with only one continuation
+            [.init(ascii: "{"), 0xf0, 0x80, 0x80],  // Invalid UTF-8: Initial byte of 3-byte sequence with only one continuation
+        ]
+        for json in arrayStrings {
+            #expect(throws: (any Error).self, "Expected error for input \"\(json)\"") {
+                try json5Decoder.decode([String].self, from: json.data(using: .utf8)!)
+            }
+        }
+        for json in objectStrings {
+            #expect(throws: (any Error).self, "Expected error for input \(json)") {
+                try json5Decoder.decode([String:Bool].self, from: json.data(using: .utf8)!)
+            }
+        }
+        for json in objectCharacterArrays {
+            #expect(throws: (any Error).self, "Expected error for input \(json)") {
+                try json5Decoder.decode([String:Bool].self, from: Data(json))
+            }
+        }
+    }
+
+    @Test func json5Strings() {
+        let stringsToTrues = [
+            "{v\n : true}",
+            "{v \n : true}",
+            "{ v \n : true,\nv\n:true,}",
+            "{v\r : true}",
+            "{v \r : true}",
+            "{ v \r : true,\rv\r:true,}",
+            "{v\r\n : true}",
+            "{v \r\n : true}",
+            "{ v \r\n : true,\r\nv\r\n:true,}",
+            "{v// comment \n : true}",
+            "{v // comment \n : true}",
+            "{v/* comment*/ \n : true}",
+            "{v/* comment */\n: true}",
+            "{v/* comment */:/*comment*/\ntrue}",
+            "{v// comment \r : true}",
+            "{v // comment \r : true}",
+            "{v/* comment*/ \r : true}",
+            "{v/* comment */\r: true}",
+            "{v/* comment */:/*comment*/\rtrue}",
+            "{v// comment \r\n : true}",
+            "{v // comment \r\n : true}",
+            "{v/* comment*/ \r\n : true}",
+            "{v/* comment */\r\n: true}",
+            "{v/* comment */:/*comment*/\r\ntrue}",
+            "// start with a comment\r\n{v:true}",
+        ]
+
+        let stringsToStrings = [
+            "{v : \"hi\\x20there\"}" : "hi there",
+            "{v : \"hi\\xthere\"}" : nil,
+            "{v : \"hi\\x2there\"}" : nil,
+            "{v : \"hi\\0there\"}" : nil,
+            "{v : \"hi\\x00there\"}" : nil,
+            "{v : \"hi\\u0000there\"}" : nil, // disallowed in JSON5 mode only
+            "{v:\"hello\\uA\"}" : nil,
+            "{v:\"hello\\uA   \"}" : nil
+        ]
+
+        for json in stringsToTrues {
+            #expect(throws: Never.self, "Failed to parse \"\(json)\"") {
+                try json5Decoder.decode([String:Bool].self, from: json.data(using: .utf8)!)
+            }
+        }
+        for (json, expected) in stringsToStrings {
+            do {
+                let decoded = try json5Decoder.decode([String:String].self, from: json.data(using: .utf8)!)
+                #expect(expected == decoded["v"])
+            } catch {
+                if let expected {
+                    Issue.record("Expected \(expected) for input \"\(json)\", but failed with \(error)")
+                }
+            }
+        }
+    }
+
+//    @Test func json5AssumedDictionary() {
+//        let decoder = json5Decoder
+//        decoder.assumesTopLevelDictionary = true
+//
+//        let stringsToString = [
+//            "hello: \"world\"" : [ "hello" : "world" ],
+//            "{hello: \"world\"}" : [ "hello" : "world" ], // Still has markers
+//            "hello: \"world\", goodbye: \"42\"" : [ "hello" : "world", "goodbye" : "42" ],  // more than one value
+//            "hello: \"world\"," : [ "hello" : "world" ], // Trailing comma
+//            "hello: \"world\"   " : [ "hello" : "world" ], // Trailing whitespace
+//            "hello: \"world\",  " : [ "hello" : "world" ], // Trailing whitespace and comma
+//            "hello: \"world\"  ,  " : [ "hello" : "world" ], // Trailing whitespace and comma
+//            "   hello   : \"world\"   " : [ "hello" : "world" ], // Before and after whitespace
+//            "{hello: \"world\"" : nil,    // Partial dictionary 1
+//            "hello: \"world\"}" : nil, // Partial dictionary 2
+//            "hello: \"world\" x " : nil, // Junk at end
+//            "hello: \"world\" x" : nil, // Junk at end
+//            "hello: \"world\"x" : nil, // Junk at end
+//            "" : [:], // empty but valid
+//            " " : [:], // empty but valid
+//            "{ }" : [:], // empty but valid
+//            "{}" : [:], // empty but valid
+//            "," : nil, // Invalid
+//            " , " : nil, // Invalid
+//            ", " : nil, // Invalid
+//            "   ," : nil, // Invalid
+//        ]
+//        for (json, expected) in stringsToString {
+//            do {
+//                let decoded = try decoder.decode([String:String].self, from: json.data(using: .utf8)!)
+//                #expect(expected == decoded)
+//            } catch {
+//                if let expected {
+//                    Issue.record("Expected \(expected) for input \"\(json)\", but failed with \(error)")
+//                }
+//            }
+//        }
+//
+//        struct HelloGoodbye : Decodable, Equatable {
+//            let hello: String
+//            let goodbye: [String:String]
+//        }
+//        let helloGoodbyeExpectedValue = HelloGoodbye(
+//            hello: "world",
+//            goodbye: ["hi" : "there"])
+//        let stringsToNestedDictionary = [
+//            "hello: \"world\", goodbye: {\"hi\":\"there\"}", // more than one value, nested dictionary
+//            "hello: \"world\", goodbye: {\"hi\":\"there\"},", // more than one value, nested dictionary, trailing comma 1
+//            "hello: \"world\", goodbye: {\"hi\":\"there\",},", // more than one value, nested dictionary, trailing comma 2
+//        ]
+//        for json in stringsToNestedDictionary {
+//            #expect(throws: Never.self, "Unexpected error for input \"\(json)\"") {
+//                let decoded = try decoder.decode(HelloGoodbye.self, from: json.data(using: .utf8)!)
+//                #expect(helloGoodbyeExpectedValue == decoded)
+//            }
+//        }
+//
+//        let arrayJSON = "[1,2,3]".data(using: .utf8)! // Assumed dictionary can't be an array
+//        #expect(throws: (any Error).self) {
+//            try decoder.decode([Int].self, from: arrayJSON)
+//        }
+//
+//        let strFragmentJSON = "fragment".data(using: .utf8)! // Assumed dictionary can't be a fragment
+//        #expect(throws: (any Error).self) {
+//            try decoder.decode(String.self, from: strFragmentJSON)
+//        }
+//
+//        let numFragmentJSON = "42".data(using: .utf8)! // Assumed dictionary can't be a fragment
+//        #expect(throws: (any Error).self) {
+//            try decoder.decode(Int.self, from: numFragmentJSON)
+//        }
+//    }
+
+    enum JSON5SpecTestType {
+        case json5
+        case json5_foundationPermissiveJSON
+        case json
+        case js
+        case malformed
+
+        var fileExtension : String {
+            switch self {
+            case .json5: return "json5"
+            case .json5_foundationPermissiveJSON: return "json5"
+            case .json: return "json"
+            case .js: return "js"
+            case .malformed: return "txt"
+            }
+        }
+    }
+}
+
+// MARK: - SnakeCase Tests
+extension JSONEncoderTests {
     @Test func decodingKeyStrategyCamel() throws {
         let fromSnakeCaseTests = [
             ("", ""), // don't die on empty string
@@ -2140,10 +2505,9 @@ extension JSONEncoderTests {
         #expect(try 7 == decoder.decode(Int.self, from: json.data(using: .utf16LittleEndian)!))
     }
     
-    private func _run_passTest<T:Codable & Equatable>(name: String, type: T.Type, sourceLocation: SourceLocation = #_sourceLocation) {
-        let jsonData = testData(forResource: name, withExtension:  "json" , subdirectory: "JSON/pass")!
-
-        let decoder = JSONDecoder()
+    private func _run_passTest<T:Codable & Equatable>(name: String, json5: Bool = false, type: T.Type, sourceLocation: SourceLocation = #_sourceLocation) {
+        let jsonData = testData(forResource: name, withExtension: json5 ? "json5" : "json" , subdirectory: json5 ? "JSON5/pass" : "JSON/pass")!
+        let decoder = json5Decoder
 
         let decoded: T
         do {
@@ -2185,6 +2549,14 @@ extension JSONEncoderTests {
         _run_passTest(name: "pass13", type: JSONPass.Test13.self)
         _run_passTest(name: "pass14", type: JSONPass.Test14.self)
         _run_passTest(name: "pass15", type: JSONPass.Test15.self)
+    }
+    
+    @Test func json5PassJSONFiles() {
+        _run_passTest(name: "example", json5: true, type: JSON5Pass.Example.self)
+        _run_passTest(name: "hex", json5: true, type: JSON5Pass.Hex.self)
+        _run_passTest(name: "numbers", json5: true, type: JSON5Pass.Numbers.self)
+        _run_passTest(name: "strings", json5: true, type: JSON5Pass.Strings.self)
+        _run_passTest(name: "whitespace", json5: true, type: JSON5Pass.Whitespace.self)
     }
 
     
@@ -2242,7 +2614,189 @@ extension JSONEncoderTests {
 
     }
 
+    func _run_json5SpecTest<T:Decodable>(_ category: String, _ name: String, testType: JSON5SpecTestType, type: T.Type, sourceLocation: SourceLocation = #_sourceLocation) {
+        let subdirectory = "/JSON5/spec/\(category)"
+        let ext = testType.fileExtension
+        let jsonData = testData(forResource: name, withExtension: ext, subdirectory: subdirectory)!
 
+        let json5 = json5Decoder
+        let json = JSONDecoder()
+
+        switch testType {
+        case .json, .json5_foundationPermissiveJSON:
+            // Valid JSON should remain valid JSON5
+            #expect(throws: Never.self, sourceLocation: sourceLocation) {
+                _ = try json5.decode(type, from: jsonData)
+            }
+
+            // Repeat with non-JSON5-compliant decoder.
+            #expect(throws: Never.self, sourceLocation: sourceLocation) {
+                _ = try json.decode(type, from: jsonData)
+            }
+        case .json5:
+            #expect(throws: Never.self, sourceLocation: sourceLocation) {
+                _ = try json5.decode(type, from: jsonData)
+            }
+
+            // Regular JSON decoder should throw.
+            do {
+                let val = try json.decode(type, from: jsonData)
+                Issue.record("Expected decode failure (original JSON)for test \(name).\(ext), but got: \(val)", sourceLocation: sourceLocation)
+            } catch { }
+        case .js:
+            // Valid ES5 that's explicitly disallowed by JSON5 is also invalid JSON.
+            do {
+                let val = try json5.decode(type, from: jsonData)
+                Issue.record("Expected decode failure (JSON5) for test \(name).\(ext), but got: \(val)", sourceLocation: sourceLocation)
+            } catch { }
+
+            // Regular JSON decoder should also throw.
+            do {
+                let val = try json.decode(type, from: jsonData)
+                Issue.record("Expected decode failure (original JSON) for test \(name).\(ext), but got: \(val)", sourceLocation: sourceLocation)
+            } catch { }
+        case .malformed:
+            // Invalid ES5 should remain invalid JSON5
+            do {
+                let val = try json5.decode(type, from: jsonData)
+                Issue.record("Expected decode failure (JSON5) for test \(name).\(ext), but got: \(val)", sourceLocation: sourceLocation)
+            } catch { }
+
+            // Regular JSON decoder should also throw.
+            do {
+                let val = try json.decode(type, from: jsonData)
+                Issue.record("Expected decode failure (original JSON) for test \(name).\(ext), but got: \(val)", sourceLocation: sourceLocation)
+            } catch { }
+        }
+    }
+
+    // Also tests non-JSON5 decoder against the non-JSON5 tests in this test suite.
+    @Test func json5Spec() {
+        // Expected successes:
+        _run_json5SpecTest("arrays", "empty-array", testType: .json, type: [Bool].self)
+        _run_json5SpecTest("arrays", "regular-array", testType: .json, type: [Bool?].self)
+        _run_json5SpecTest("arrays", "trailing-comma-array", testType: .json5_foundationPermissiveJSON, type: [NullReader].self)
+
+        _run_json5SpecTest("comments", "block-comment-following-array-element", testType: .json5, type: [Bool].self)
+        _run_json5SpecTest("comments", "block-comment-following-top-level-value", testType: .json5, type: NullReader.self)
+        _run_json5SpecTest("comments", "block-comment-in-string", testType: .json, type: String.self)
+        _run_json5SpecTest("comments", "block-comment-preceding-top-level-value", testType: .json5, type: NullReader.self)
+        _run_json5SpecTest("comments", "block-comment-with-asterisks", testType: .json5, type: Bool.self)
+        _run_json5SpecTest("comments", "inline-comment-following-array-element", testType: .json5, type: [Bool].self)
+        _run_json5SpecTest("comments", "inline-comment-following-top-level-value", testType: .json5, type: NullReader.self)
+        _run_json5SpecTest("comments", "inline-comment-in-string", testType: .json, type: String.self)
+        _run_json5SpecTest("comments", "inline-comment-preceding-top-level-value", testType: .json5, type: NullReader.self)
+
+        _run_json5SpecTest("misc", "npm-package", testType: .json, type: JSON5Spec.NPMPackage.self)
+        _run_json5SpecTest("misc", "npm-package", testType: .json5, type: JSON5Spec.NPMPackage.self)
+        _run_json5SpecTest("misc", "readme-example", testType: .json5, type: JSON5Spec.ReadmeExample.self)
+        _run_json5SpecTest("misc", "valid-whitespace", testType: .json5, type: [String:Bool].self)
+
+        _run_json5SpecTest("new-lines", "comment-cr", testType: .json5, type: [String:String].self)
+        _run_json5SpecTest("new-lines", "comment-crlf", testType: .json5, type: [String:String].self)
+        _run_json5SpecTest("new-lines", "comment-lf", testType: .json5, type: [String:String].self)
+        _run_json5SpecTest("new-lines", "escaped-cr", testType: .json5, type: [String:String].self)
+        _run_json5SpecTest("new-lines", "escaped-crlf", testType: .json5, type: [String:String].self)
+        _run_json5SpecTest("new-lines", "escaped-lf", testType: .json5, type: [String:String].self)
+
+        _run_json5SpecTest("numbers", "float-leading-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "float-leading-zero", testType: .json, type: Double.self)
+        _run_json5SpecTest("numbers", "float-trailing-decimal-point-with-integer-exponent", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "float-trailing-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "float-with-integer-exponent", testType: .json, type: Double.self)
+        _run_json5SpecTest("numbers", "float", testType: .json, type: Double.self)
+        _run_json5SpecTest("numbers", "hexadecimal-lowercase-letter", testType: .json5, type: UInt.self)
+        _run_json5SpecTest("numbers", "hexadecimal-uppercase-x", testType: .json5, type: UInt.self)
+        _run_json5SpecTest("numbers", "hexadecimal-with-integer-exponent", testType: .json5, type: UInt.self)
+        _run_json5SpecTest("numbers", "hexadecimal", testType: .json5, type: UInt.self)
+        _run_json5SpecTest("numbers", "infinity", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "integer-with-integer-exponent", testType: .json, type: Double.self)
+        _run_json5SpecTest("numbers", "integer-with-negative-integer-exponent", testType: .json, type: Double.self)
+        _run_json5SpecTest("numbers", "integer-with-negative-zero-integer-exponent", testType: .json, type: Int.self)
+        _run_json5SpecTest("numbers", "integer-with-positive-integer-exponent", testType: .json, type: Int.self)
+        _run_json5SpecTest("numbers", "integer-with-positive-zero-integer-exponent", testType: .json, type: Int.self)
+        _run_json5SpecTest("numbers", "integer-with-zero-integer-exponent", testType: .json, type: Int.self)
+        _run_json5SpecTest("numbers", "integer", testType: .json, type: Int.self)
+        _run_json5SpecTest("numbers", "nan", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "negative-float-leading-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "negative-float-leading-zero", testType: .json, type: Double.self)
+        _run_json5SpecTest("numbers", "negative-float-trailing-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "negative-float", testType: .json, type: Double.self)
+        _run_json5SpecTest("numbers", "negative-hexadecimal", testType: .json5, type: Int.self)
+        _run_json5SpecTest("numbers", "negative-infinity", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "negative-integer", testType: .json, type: Int.self)
+        _run_json5SpecTest("numbers", "negative-zero-float-leading-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "negative-zero-float-trailing-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "negative-zero-hexadecimal", testType: .json5, type: Int.self)
+        _run_json5SpecTest("numbers", "negative-zero-integer", testType: .json, type: Int.self)
+        _run_json5SpecTest("numbers", "positive-integer", testType: .json5, type: Int.self)
+        _run_json5SpecTest("numbers", "positive-zero-float-leading-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "positive-zero-float-trailing-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "positive-zero-float", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "positive-zero-hexadecimal", testType: .json5, type: Int.self)
+        _run_json5SpecTest("numbers", "positive-zero-integer", testType: .json5, type: Int.self)
+        _run_json5SpecTest("numbers", "zero-float-leading-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "zero-float-trailing-decimal-point", testType: .json5, type: Double.self)
+        _run_json5SpecTest("numbers", "zero-float", testType: .json, type: Double.self)
+        _run_json5SpecTest("numbers", "zero-hexadecimal", testType: .json5, type: Int.self)
+        _run_json5SpecTest("numbers", "zero-integer-with-integer-exponent", testType: .json, type: Int.self)
+        _run_json5SpecTest("numbers", "zero-integer", testType: .json, type: Int.self)
+
+        _run_json5SpecTest("objects", "duplicate-keys", testType: .json, type: [String:Bool].self)
+        _run_json5SpecTest("objects", "empty-object", testType: .json, type: [String:Bool].self)
+        _run_json5SpecTest("objects", "reserved-unquoted-key", testType: .json5, type: [String:Bool].self)
+        _run_json5SpecTest("objects", "single-quoted-key", testType: .json5, type: [String:String].self)
+        _run_json5SpecTest("objects", "trailing-comma-object", testType: .json5_foundationPermissiveJSON, type: [String:String].self)
+        _run_json5SpecTest("objects", "unquoted-keys", testType: .json5, type: [String:String].self)
+
+        _run_json5SpecTest("strings", "escaped-single-quoted-string", testType: .json5, type: String.self)
+        _run_json5SpecTest("strings", "multi-line-string", testType: .json5, type: String.self)
+        _run_json5SpecTest("strings", "single-quoted-string", testType: .json5, type: String.self)
+
+        _run_json5SpecTest("todo", "unicode-escaped-unquoted-key", testType: .json5, type: [String:String].self)
+        _run_json5SpecTest("todo", "unicode-unquoted-key", testType: .json5, type: [String:String].self)
+
+        // Expected failures:
+        _run_json5SpecTest("arrays", "leading-comma-array", testType: .js, type: [Bool].self)
+        _run_json5SpecTest("arrays", "lone-trailing-comma-array", testType: .js, type: [Bool].self)
+        _run_json5SpecTest("arrays", "no-comma-array", testType: .malformed, type: [Bool].self)
+
+        _run_json5SpecTest("comments", "top-level-block-comment", testType: .malformed, type: Bool.self)
+        _run_json5SpecTest("comments", "top-level-inline-comment", testType: .malformed, type: Bool.self)
+        _run_json5SpecTest("comments", "unterminated-block-comment", testType: .malformed, type: Bool.self)
+
+        _run_json5SpecTest("misc", "empty", testType: .malformed, type: Bool.self)
+
+        _run_json5SpecTest("numbers", "hexadecimal-empty", testType: .malformed, type: UInt.self)
+        _run_json5SpecTest("numbers", "integer-with-float-exponent", testType: .malformed, type: Double.self)
+        _run_json5SpecTest("numbers", "integer-with-hexadecimal-exponent", testType: .malformed, type: Double.self)
+        _run_json5SpecTest("numbers", "integer-with-negative-float-exponent", testType: .malformed, type: Double.self)
+        _run_json5SpecTest("numbers", "integer-with-negative-hexadecimal-exponent", testType: .malformed, type: Double.self)
+        _run_json5SpecTest("numbers", "integer-with-positive-float-exponent", testType: .malformed, type: Double.self)
+        _run_json5SpecTest("numbers", "integer-with-positive-hexadecimal-exponent", testType: .malformed, type: Double.self)
+        _run_json5SpecTest("numbers", "lone-decimal-point", testType: .malformed, type: Double.self)
+        _run_json5SpecTest("numbers", "negative-noctal", testType: .js, type: Int.self)
+        _run_json5SpecTest("numbers", "negative-octal", testType: .malformed, type: Int.self)
+        _run_json5SpecTest("numbers", "noctal-with-leading-octal-digit", testType: .js, type: Int.self)
+        _run_json5SpecTest("numbers", "noctal", testType: .js, type: Int.self)
+        _run_json5SpecTest("numbers", "octal", testType: .malformed, type: Int.self)
+        _run_json5SpecTest("numbers", "positive-noctal", testType: .js, type: Int.self)
+        _run_json5SpecTest("numbers", "positive-octal", testType: .malformed, type: Int.self)
+        _run_json5SpecTest("numbers", "positive-zero-octal", testType: .malformed, type: Int.self)
+        _run_json5SpecTest("numbers", "zero-octal", testType: .malformed, type: Int.self)
+
+        _run_json5SpecTest("objects", "illegal-unquoted-key-number", testType: .malformed, type: [String:String].self)
+
+        // The spec test disallows this case, but historically NSJSONSerialization has allowed it. Our new implementation is more up-to-spec.
+        _run_json5SpecTest("objects", "illegal-unquoted-key-symbol", testType: .malformed, type: [String:String].self)
+
+        _run_json5SpecTest("objects", "leading-comma-object", testType: .malformed, type: [String:String].self)
+        _run_json5SpecTest("objects", "lone-trailing-comma-object", testType: .malformed, type: [String:String].self)
+        _run_json5SpecTest("objects", "no-comma-object", testType: .malformed, type: [String:String].self)
+
+        _run_json5SpecTest("strings", "unescaped-multi-line-string", testType: .malformed, type: String.self)
+
+    }
 
     @Test func encodingDateISO8601() {
         let timestamp = Date(timeIntervalSince1970: 1000)

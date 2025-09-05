@@ -78,7 +78,8 @@ let package = Package(
                 .copy("Models/random.json"),
                 .copy("Models/twitter.json"),
                 .copy("Models/twitter2.json"),
-                .copy("Models/twitterescaped.json")
+                .copy("Models/twitterescaped.json"),
+                .copy("Resources")
             ]
         )
     ]

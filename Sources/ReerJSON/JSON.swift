@@ -71,7 +71,13 @@ extension JSON {
         guard let cString = yyjson_get_raw(pointer) else { return false }
         var convertedVal = yyjson_val()
         var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, YYJSON_READ_ALLOW_EXT_NUMBER, nil, &error) else {
+        guard let _ = yyjson_read_number(
+            cString,
+            &convertedVal,
+            YYJSON_READ_ALLOW_EXT_NUMBER | YYJSON_READ_ALLOW_INF_AND_NAN,
+            nil,
+            &error
+        ) else {
             return false
         }
         return yyjson_is_num(&convertedVal)
@@ -82,8 +88,16 @@ extension JSON {
         guard let cString = yyjson_get_raw(pointer) else { return nil }
         var convertedVal = yyjson_val()
         var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, YYJSON_READ_ALLOW_EXT_NUMBER, nil, &error),
-              yyjson_is_num(&convertedVal) else {
+        guard
+            let _ = yyjson_read_number(
+                cString,
+                &convertedVal,
+                YYJSON_READ_ALLOW_EXT_NUMBER | YYJSON_READ_ALLOW_INF_AND_NAN,
+                nil,
+                &error
+            ),
+            yyjson_is_num(&convertedVal)
+        else {
             return nil
         }
         return yyjson_get_num(&convertedVal)
@@ -94,8 +108,16 @@ extension JSON {
         guard let cString = yyjson_get_raw(pointer) else { return 0 }
         var convertedVal = yyjson_val()
         var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, YYJSON_READ_ALLOW_EXT_NUMBER, nil, &error),
-              yyjson_is_num(&convertedVal) else {
+        guard
+            let _ = yyjson_read_number(
+                cString,
+                &convertedVal,
+                YYJSON_READ_ALLOW_EXT_NUMBER | YYJSON_READ_ALLOW_INF_AND_NAN,
+                nil,
+                &error
+            ),
+            yyjson_is_num(&convertedVal)
+        else {
             return 0
         }
         return yyjson_get_num(&convertedVal)

@@ -359,7 +359,7 @@ final class JSONDecoderImpl: Decoder {
     ) throws -> F where F: LosslessStringConvertible {
         if let numberValue = value.number {
             
-            guard numberValue.isFinite else {
+            guard numberValue.isFinite || options.json5 else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
                     debugDescription: "Number \(value.debugDataTypeDescription) is not representable in Swift."

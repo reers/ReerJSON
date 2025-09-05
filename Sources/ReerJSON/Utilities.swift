@@ -136,13 +136,13 @@ extension Optional {
 }
 
 #if os(Linux)
-let _iso8601Formatter: ISO8601DateFormatter = {
+nonisolated(unsafe) let _iso8601Formatter: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = .withInternetDateTime
     return formatter
 }()
 #else
-let _iso8601Formatter: JJLISO8601DateFormatter = {
+nonisolated(unsafe) let _iso8601Formatter: JJLISO8601DateFormatter = {
     let formatter = JJLISO8601DateFormatter()
     formatter.formatOptions = .withInternetDateTime
     return formatter

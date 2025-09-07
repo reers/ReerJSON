@@ -477,10 +477,10 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     
     @inline(__always)
     private func decodeInteger<T: FixedWidthInteger>() throws -> T {
-        guard topValue.isNumber else {
-            throw createTypeMismatchError(type: T.self, for: codingPath, value: topValue)
-        }
         guard let int: T =  topValue.integer() else {
+            guard topValue.isNumber else {
+                throw createTypeMismatchError(type: T.self, for: codingPath, value: topValue)
+            }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: codingPath,
                 debugDescription: "Number \(topValue.numberValue) is not representable in Swift."

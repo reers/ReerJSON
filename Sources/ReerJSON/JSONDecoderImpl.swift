@@ -1472,16 +1472,3 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
         return int
     }
 }
-
-private extension JSONDecoder.KeyDecodingStrategy {
-    var isDefault: Bool {
-        switch self {
-        case .useDefaultKeys:
-            return true
-        case .convertFromSnakeCase, .custom:
-            return false
-        @unknown default:
-            return false
-        }
-    }
-}

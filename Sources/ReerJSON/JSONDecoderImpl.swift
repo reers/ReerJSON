@@ -168,7 +168,7 @@ final class JSONDecoderImpl: Decoder {
         if type == Decimal.self {
             return try unboxDecimal(from: value, for: codingPathNode, additionalKey) as! T
         }
-        if let dictType = type as? StringDecodableDictionary.Type {
+        if !options.keyDecodingStrategy.isDefault, let dictType = type as? StringDecodableDictionary.Type {
             return try unboxDictionary(from: value, as: dictType, for: codingPathNode, additionalKey)
         }
         

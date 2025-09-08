@@ -127,6 +127,18 @@ extension Dictionary : StringDecodableDictionary where Key == String, Value: Dec
     static var elementType: Decodable.Type { return Value.self }
 }
 
+extension JSONDecoder.KeyDecodingStrategy {
+    @inline(__always)
+    var isDefault: Bool {
+        switch self {
+        case .useDefaultKeys:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 // This is a workaround for the lack of a "set value only if absent" function for Dictionary.
 extension Optional {
     mutating func _setIfNil(to value: Wrapped) {

@@ -35,10 +35,17 @@ Tested with ReerJSON 0.1.0, ZippyJSON 1.2.15, IkigaJSON 2.3.2
 # Usage
 Just replace `JSONDecoder` with `ReerJSONDecoder` wherever you want to use it. So instead of `let decoder = JSONDecoder()`, do `let decoder = ReerJSONDecoder()`, and everything will just work. This is because `ReerJSONDecoder` has the exact same API as `JSONDecoder`. Also, don't forget to add `import ReerJSON` in files where you use it.
 
+# Differences
+| Decoder Diff              | Foundation |ReerJSON                   |
+|---------------------------|------------|---------------------------|
+| JSON5                     | ✅         | ✅                        |                       
+| assumesTopLevelDictionary | ✅         | ❌                        |
+| Infinity and NaN          | ±Infinity, ±NaN | ±Infinity, ±NaN, ±Inf and case-insensitive. See [details](https://github.com/reers/ReerJSON/blob/main/Tests/ReerJSONTests/JSONEncoderTests.swift#L1975) |
+
 # TODO
 * [x] Add GitHub workflow for CI.
 * [x] Support `CodableWithConfiguration`.
-* [ ] Support JSON5 decoding.
+* [x] Support JSON5 decoding.
 * [ ] Implement ReerJSONEncoder.
 
 # License

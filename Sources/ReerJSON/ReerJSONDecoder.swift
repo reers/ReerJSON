@@ -295,9 +295,11 @@ open class ReerJSONDecoder {
         decoder.keyDecodingStrategy = keyDecodingStrategy
         decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
         decoder.userInfo = userInfo
+        #if !os(Linux)
         if #available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, visionOS 1, *) {
             decoder.allowsJSON5 = allowsJSON5
         }
+        #endif
         return try decoder.decode(type, from: data)
     }
     

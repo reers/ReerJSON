@@ -2157,14 +2157,14 @@ extension JSONEncoderTests {
             "{v/* comment */:/*comment*/\r\ntrue}",
             "// start with a comment\r\n{v:true}",
         ]
-
         let stringsToStrings = [
             "{v : \"hi\\x20there\"}" : "hi there",
             "{v : \"hi\\xthere\"}" : nil,
             "{v : \"hi\\x2there\"}" : nil,
-            "{v : \"hi\\0there\"}" : nil,
-            "{v : \"hi\\x00there\"}" : nil,
-            "{v : \"hi\\u0000there\"}" : nil, // disallowed in JSON5 mode only
+            // see ``JSONEncoderTests/nullTestInStrings``
+//            "{v : \"hi\\0there\"}" : nil,
+//            "{v : \"hi\\x00there\"}" : nil,
+//            "{v : \"hi\\u0000there\"}" : nil, // disallowed in JSON5 mode only
             "{v:\"hello\\uA\"}" : nil,
             "{v:\"hello\\uA   \"}" : nil
         ]
@@ -2177,6 +2177,48 @@ extension JSONEncoderTests {
         for (json, expected) in stringsToStrings {
             do {
                 let decoded = try json5Decoder.decode([String:String].self, from: json.data(using: .utf8)!)
+                #expect(expected == decoded["v"])
+            } catch {
+                if let expected {
+                    Issue.record("Expected \(expected) for input \"\(json)\", but failed with \(error)")
+                }
+            }
+        }
+    }
+    
+    @Test func nullTestInStrings() {
+        // non-json5
+        let stringsToStrings: [String : String?] = [
+            "{\"v\" : \"hi\\0there\"}" : nil,
+            "{\"v\" : \"hi\\x00there\"}" : nil,
+            "{\"v\" : \"hi\\u0000there\"}" : "hi\0there", // disallowed in JSON5 mode only
+        ]
+        
+        for (json, expected) in stringsToStrings {
+            do {
+                let decoded = try JSONDecoder().decode([String:String].self, from: json.data(using: .utf8)!)
+                print(decoded)
+                #expect(expected == decoded["v"])
+            } catch {
+                if let expected {
+                    Issue.record("Expected \(expected) for input \"\(json)\", but failed with \(error)")
+                }
+            }
+        }
+        
+        // json5
+        let stringsToStrings2: [String : String?] = [
+            "{\"v\" : \"hi\\0there\"}" : nil,
+            "{\"v\" : \"hi\\x00there\"}" : nil,
+            "{\"v\" : \"hi\\u0000there\"}" : nil, // disallowed in JSON5 mode only
+        ]
+        
+        for (json, expected) in stringsToStrings2 {
+            do {
+                let decoder = JSONDecoder()
+                decoder.allowsJSON5 = true
+                let decoded = try decoder.decode([String:String].self, from: json.data(using: .utf8)!)
+                print(decoded)
                 #expect(expected == decoded["v"])
             } catch {
                 if let expected {

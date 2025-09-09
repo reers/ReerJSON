@@ -2196,7 +2196,7 @@ extension JSONEncoderTests {
         
         for (json, expected) in stringsToStrings {
             do {
-                let decoded = try JSONDecoder().decode([String:String].self, from: json.data(using: .utf8)!)
+                let decoded = try ReerJSONDecoder().decode([String:String].self, from: json.data(using: .utf8)!)
                 print(decoded)
                 #expect(expected == decoded["v"])
             } catch {
@@ -2215,7 +2215,7 @@ extension JSONEncoderTests {
         
         for (json, expected) in stringsToStrings2 {
             do {
-                let decoder = JSONDecoder()
+                let decoder = ReerJSONDecoder()
                 decoder.allowsJSON5 = true
                 let decoded = try decoder.decode([String:String].self, from: json.data(using: .utf8)!)
                 print(decoded)

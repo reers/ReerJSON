@@ -61,8 +61,24 @@ extension JSON {
     }
     
     @inline(__always)
+    var stringWhenJSON5: String? {
+        guard let cString = yyjson_get_str(pointer) else { return nil }
+        let length = yyjson_get_len(pointer)
+        if memchr(cString, 0, length) != nil {
+            return nil
+        }
+        return String(cString: cString)
+    }
+    
+    @inline(__always)
     var string: String? {
         guard let cString = yyjson_get_str(pointer) else { return nil }
+        let length = yyjson_get_len(pointer)
+        if memchr(cString, 0, length) != nil {
+            let length = yyjson_get_len(pointer)
+            let rawBuffer = UnsafeRawBufferPointer(start: cString, count: length)
+            return String(bytes: rawBuffer, encoding: .utf8)
+        }
         return String(cString: cString)
     }
     

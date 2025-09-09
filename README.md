@@ -63,7 +63,7 @@ We would like to express our gratitude to the following projects and their contr
 
 * **[ibireme/yyjson](https://github.com/ibireme/yyjson)** - For providing the high-performance JSON parsing library that powers ReerJSON.
 * **[swiftlang/swift-foundation](https://github.com/swiftlang/swift-foundation)** - For implementation reference and comprehensive test suites that helped ensure compatibility.
-* **[michaeleisel/ZippyJSON](https://github.com/michaeleisel/ZippyJSON)** - For the innovative Swift JSON parsing approach and valuable test cases used in our benchmarking.
+* **[michaeleisel/ZippyJSON](https://github.com/michaeleisel/ZippyJSON)** - For the innovative Swift JSON parsing approach and valuable test cases.
 * **[michaeleisel/JJLISO8601DateFormatter](https://github.com/michaeleisel/JJLISO8601DateFormatter)** - For the high-performance date formatting implementation.
 * **[nixzhu/Ananda](https://github.com/nixzhu/Ananda)** - For the pioneering work in integrating yyjson with Swift and providing architectural inspiration.
 

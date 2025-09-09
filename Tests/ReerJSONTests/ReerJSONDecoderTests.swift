@@ -203,8 +203,11 @@ class ReerJSONTests: XCTestCase {
     #else
         let path = Bundle(for: type(of: self)).path(forResource: file, ofType: "")!
     #endif
-        let string = try! String(contentsOfFile: path)
-        return string.data(using: .utf8)!
+        if let string = try? String(contentsOfFile: path) {
+            return string.data(using: .utf8)!
+        } else {
+            return try! Data(contentsOf: URL(filePath: path))
+        }
     }
     
 	func testExceptionSafetyAroundObjectPool() {

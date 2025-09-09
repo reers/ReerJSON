@@ -61,8 +61,24 @@ extension JSON {
     }
     
     @inline(__always)
+    var stringWhenJSON5: String? {
+        guard let cString = yyjson_get_str(pointer) else { return nil }
+        let length = yyjson_get_len(pointer)
+        if memchr(cString, 0, length) != nil {
+            return nil
+        }
+        return String(cString: cString)
+    }
+    
+    @inline(__always)
     var string: String? {
         guard let cString = yyjson_get_str(pointer) else { return nil }
+        let length = yyjson_get_len(pointer)
+        if memchr(cString, 0, length) != nil {
+            let length = yyjson_get_len(pointer)
+            let rawBuffer = UnsafeRawBufferPointer(start: cString, count: length)
+            return String(bytes: rawBuffer, encoding: .utf8)
+        }
         return String(cString: cString)
     }
     
@@ -71,7 +87,13 @@ extension JSON {
         guard let cString = yyjson_get_raw(pointer) else { return false }
         var convertedVal = yyjson_val()
         var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error) else {
+        guard let _ = yyjson_read_number(
+            cString,
+            &convertedVal,
+            YYJSON_READ_ALLOW_EXT_NUMBER | YYJSON_READ_ALLOW_INF_AND_NAN,
+            nil,
+            &error
+        ) else {
             return false
         }
         return yyjson_is_num(&convertedVal)
@@ -82,8 +104,16 @@ extension JSON {
         guard let cString = yyjson_get_raw(pointer) else { return nil }
         var convertedVal = yyjson_val()
         var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error),
-              yyjson_is_num(&convertedVal) else {
+        guard
+            let _ = yyjson_read_number(
+                cString,
+                &convertedVal,
+                YYJSON_READ_ALLOW_EXT_NUMBER | YYJSON_READ_ALLOW_INF_AND_NAN,
+                nil,
+                &error
+            ),
+            yyjson_is_num(&convertedVal)
+        else {
             return nil
         }
         return yyjson_get_num(&convertedVal)
@@ -94,8 +124,16 @@ extension JSON {
         guard let cString = yyjson_get_raw(pointer) else { return 0 }
         var convertedVal = yyjson_val()
         var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error),
-              yyjson_is_num(&convertedVal) else {
+        guard
+            let _ = yyjson_read_number(
+                cString,
+                &convertedVal,
+                YYJSON_READ_ALLOW_EXT_NUMBER | YYJSON_READ_ALLOW_INF_AND_NAN,
+                nil,
+                &error
+            ),
+            yyjson_is_num(&convertedVal)
+        else {
             return 0
         }
         return yyjson_get_num(&convertedVal)
@@ -111,7 +149,7 @@ extension JSON {
         guard let cString = yyjson_get_raw(pointer) else { return nil }
         var convertedVal = yyjson_val()
         var error = yyjson_read_err()
-        guard let _ = yyjson_read_number(cString, &convertedVal, 0, nil, &error) else {
+        guard let _ = yyjson_read_number(cString, &convertedVal, YYJSON_READ_ALLOW_EXT_NUMBER, nil, &error) else {
             return nil
         }
         if yyjson_is_uint(&convertedVal) {

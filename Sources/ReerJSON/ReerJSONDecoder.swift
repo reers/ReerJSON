@@ -144,6 +144,16 @@ open class ReerJSONDecoder {
             options.userInfo = newValue
         }
     }
+    
+    /// Set to `true` to allow parsing of JSON5. Defaults to `false`.
+    open var allowsJSON5: Bool {
+        get {
+            options.json5
+        }
+        set {
+            options.json5 = newValue
+        }
+    }
 
     /// Options set on the top-level encoder to pass down the decoding hierarchy.
     struct Options {
@@ -175,11 +185,15 @@ open class ReerJSONDecoder {
     /// - throws: `DecodingError.dataCorrupted` if values requested from the payload are corrupted, or if the given data is not valid JSON.
     /// - throws: An error if any value throws an error during decoding.
     open func decode<T: Decodable>(_ type: T.Type, from data: Data, path: [String] = []) throws -> T {
+        var flag: yyjson_read_flag = YYJSON_READ_NUMBER_AS_RAW
+        if options.json5 {
+            flag |= YYJSON_READ_JSON5
+        }
         let doc = data.withUnsafeBytes {
             yyjson_read(
                 $0.bindMemory(to: CChar.self).baseAddress,
                 data.count,
-                YYJSON_READ_NUMBER_AS_RAW
+                flag
             )
         }
         guard let doc else {
@@ -224,11 +238,15 @@ open class ReerJSONDecoder {
         path: [String] = [],
         configuration: T.DecodingConfiguration
     ) throws -> T {
+        var flag: yyjson_read_flag = YYJSON_READ_NUMBER_AS_RAW
+        if options.json5 {
+            flag |= YYJSON_READ_JSON5
+        }
         let doc = data.withUnsafeBytes {
             yyjson_read(
                 $0.bindMemory(to: CChar.self).baseAddress,
                 data.count,
-                YYJSON_READ_NUMBER_AS_RAW
+                flag
             )
         }
         guard let doc else {
@@ -277,6 +295,11 @@ open class ReerJSONDecoder {
         decoder.keyDecodingStrategy = keyDecodingStrategy
         decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
         decoder.userInfo = userInfo
+        #if !os(Linux)
+        if #available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, visionOS 1, *) {
+            decoder.allowsJSON5 = allowsJSON5
+        }
+        #endif
         return try decoder.decode(type, from: data)
     }
     
@@ -293,6 +316,7 @@ open class ReerJSONDecoder {
         decoder.keyDecodingStrategy = keyDecodingStrategy
         decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
         decoder.userInfo = userInfo
+        decoder.allowsJSON5 = allowsJSON5
         return try decoder.decode(type, from: data, configuration: configuration)
     }
     #endif

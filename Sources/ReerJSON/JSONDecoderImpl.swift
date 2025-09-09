@@ -339,7 +339,7 @@ final class JSONDecoderImpl: Decoder {
     func unboxString<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> String {
         try checkNotNull(value, expectedType: String.self, for: codingPathNode, additionalKey)
         
-        guard let string = value.string else {
+        guard let string = options.json5 ? value.stringWhenJSON5 : value.string else {
             throw createTypeMismatchError(type: String.self, for: codingPathNode.path(byAppending: additionalKey), value: value)
         }
         return string
@@ -359,7 +359,7 @@ final class JSONDecoderImpl: Decoder {
     ) throws -> F where F: LosslessStringConvertible {
         if let numberValue = value.number {
             
-            guard numberValue.isFinite else {
+            guard numberValue.isFinite || options.json5 else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: codingPath,
                     debugDescription: "Number \(value.debugDataTypeDescription) is not representable in Swift."
@@ -372,7 +372,7 @@ final class JSONDecoderImpl: Decoder {
 
         // Try to decode from a string, for non-conforming float strategy.
         if case .convertFromString(let posInf, let negInf, let nan) = options.nonConformingFloatDecodingStrategy,
-           let string = value.string {
+           let string = options.json5 ? value.stringWhenJSON5 : value.string {
             if string == posInf {
                 return F.infinity
             }
@@ -403,7 +403,7 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
     }
 
     func decode(_: String.Type) throws -> String {
-        guard let string = topValue.string else {
+        guard let string = options.json5 ? topValue.stringWhenJSON5 : topValue.string else {
             throw createTypeMismatchError(type: String.self, for: codingPath, value: topValue)
         }
         return string
@@ -559,7 +559,7 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
 
     func decode(_ type: String.Type, forKey key: K) throws -> String {
         let jsonValue = try getValue(forKey: key)
-        guard let string = jsonValue.string else {
+        guard let string = impl.options.json5 ? jsonValue.stringWhenJSON5 : jsonValue.string else {
             throw createTypeMismatchError(type: String.self, forKey: key, value: jsonValue)
         }
         return string
@@ -569,7 +569,7 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
         guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        guard let string = jsonValue.string else {
+        guard let string = impl.options.json5 ? jsonValue.stringWhenJSON5 : jsonValue.string else {
             throw createTypeMismatchError(type: String.self, forKey: key, value: jsonValue)
         }
         return string
@@ -932,7 +932,7 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
 
     func decode(_ type: String.Type, forKey key: K) throws -> String {
         let jsonValue = try getValue(forKey: key)
-        guard let string = jsonValue.string else {
+        guard let string = impl.options.json5 ? jsonValue.stringWhenJSON5 : jsonValue.string else {
             throw createTypeMismatchError(type: String.self, forKey: key, value: jsonValue)
         }
         return string
@@ -942,7 +942,7 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
         guard let jsonValue = getValueIfPresent(forKey: key), !jsonValue.isNull else {
             return nil
         }
-        guard let string = jsonValue.string else {
+        guard let string = impl.options.json5 ? jsonValue.stringWhenJSON5 : jsonValue.string else {
             throw createTypeMismatchError(type: String.self, forKey: key, value: jsonValue)
         }
         return string
@@ -1340,7 +1340,7 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
 
     mutating func decode(_ type: String.Type) throws -> String {
         let value = try valueFromIterator(ofType: String.self)
-        guard let string = value.string else {
+        guard let string = impl.options.json5 ? value.stringWhenJSON5 : value.string else {
             throw impl.createTypeMismatchError(type: type, for: currentCodingPath, value: value)
         }
         advanceToNextValue()

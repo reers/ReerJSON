@@ -127,6 +127,46 @@ extension Dictionary : StringDecodableDictionary where Key == String, Value: Dec
     static var elementType: Decodable.Type { return Value.self }
 }
 
+protocol StringEncodableDictionary { }
+
+extension Dictionary: StringEncodableDictionary where Key == String, Value: Encodable {}
+
+/// 用于标识可以优化编码的数组类型
+/// 与 Foundation 不同，yyjson 版本不需要复杂的字节级优化
+/// yyjson 的 C 实现本身就足够高效
+protocol EncodableArray {}
+
+/// 标识数组元素类型，用于类型检查和优化
+protocol EncodableArrayElement {}
+
+// 基础数值类型扩展
+extension Int : EncodableArrayElement {}
+extension Int8 : EncodableArrayElement {}
+extension Int16 : EncodableArrayElement {}
+extension Int32 : EncodableArrayElement {}
+extension Int64 : EncodableArrayElement {}
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+extension Int128 : EncodableArrayElement {}
+
+extension UInt : EncodableArrayElement {}
+extension UInt8 : EncodableArrayElement {}
+extension UInt16 : EncodableArrayElement {}
+extension UInt32 : EncodableArrayElement {}
+extension UInt64 : EncodableArrayElement {}
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+extension UInt128 : EncodableArrayElement {}
+
+extension Float : EncodableArrayElement {}
+extension Double : EncodableArrayElement {}
+extension String : EncodableArrayElement {}
+extension Bool : EncodableArrayElement {}
+
+// 让嵌套数组也符合 EncodableArrayElement
+extension Array : EncodableArrayElement where Element: EncodableArrayElement {}
+
+// 单一的数组扩展，支持所有情况
+extension Array : EncodableArray {}
+
 extension JSONDecoder.KeyDecodingStrategy {
     @inline(__always)
     var isDefault: Bool {

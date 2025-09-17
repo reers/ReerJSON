@@ -168,9 +168,60 @@ final class JSONDecoderImpl: Decoder {
         if type == Decimal.self {
             return try unboxDecimal(from: value, for: codingPathNode, additionalKey) as! T
         }
+        // Dictionary
         if !options.keyDecodingStrategy.isDefault, let dictType = type as? StringDecodableDictionary.Type {
             return try unboxDictionary(from: value, as: dictType, for: codingPathNode, additionalKey)
         }
+        // Array (Written for performance.)
+        if type == [String].self {
+            return try unboxArray(from: value, as: [String].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [Double].self {
+            return try unboxArray(from: value, as: [Double].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [Float].self {
+            return try unboxArray(from: value, as: [Float].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [Int].self {
+            return try unboxArray(from: value, as: [Int].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [Int8].self {
+            return try unboxArray(from: value, as: [Int8].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [Int16].self {
+            return try unboxArray(from: value, as: [Int16].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [Int32].self {
+            return try unboxArray(from: value, as: [Int32].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [Int64].self {
+            return try unboxArray(from: value, as: [Int64].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [UInt].self {
+            return try unboxArray(from: value, as: [UInt].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [UInt8].self {
+            return try unboxArray(from: value, as: [UInt8].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [UInt16].self {
+            return try unboxArray(from: value, as: [UInt16].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [UInt32].self {
+            return try unboxArray(from: value, as: [UInt32].self, for: codingPathNode, additionalKey) as! T
+        }
+        if type == [UInt64].self {
+            return try unboxArray(from: value, as: [UInt64].self, for: codingPathNode, additionalKey) as! T
+        }
+        #if compiler(>=6.0)
+        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *) {
+            if type == [Int128].self {
+                return try unboxArray(from: value, as: [Int128].self, for: codingPathNode, additionalKey) as! T
+            }
+            if type == [UInt128].self {
+                return try unboxArray(from: value, as: [UInt128].self, for: codingPathNode, additionalKey) as! T
+            }
+        }
+        #endif
         
         return try with(value: value, path: codingPathNode.appending(additionalKey)) {
             try type.init(from: self)
@@ -336,6 +387,113 @@ final class JSONDecoderImpl: Decoder {
         return result as! T
     }
     
+    private func unboxArray<T: Decodable, K: CodingKey>(
+        from value: JSON,
+        as arrayType: [T].Type,
+        for codingPathNode: CodingPathNode,
+        _ additionalKey: K? = nil
+    ) throws -> [T] {
+        try checkNotNull(value, expectedType: [T].self, for: codingPathNode, additionalKey)
+        
+        guard value.isArray else {
+            throw createTypeMismatchError(
+                type: [T].self,
+                for: codingPathNode.path(byAppending: additionalKey),
+                value: value
+            )
+        }
+        
+        let arraySize = yyjson_arr_size(value.pointer)
+        let arrayCodingPathNode = codingPathNode.appending(additionalKey)
+        
+        var result: [T] = []
+        result.reserveCapacity(arraySize)
+        
+        var iter = yyjson_arr_iter()
+        guard yyjson_arr_iter_init(value.pointer, &iter) else {
+            if arraySize == 0 {
+                return result
+            }
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPathNode.path(byAppending: additionalKey),
+                debugDescription: "Failed to initialize array iterator."
+            ))
+        }
+        var index = 0
+        
+        while let elementPtr = yyjson_arr_iter_next(&iter) {
+            let elementValue = JSON(pointer: elementPtr)
+            let indexKey = _CodingKey(index: index)
+            
+            let decodedValue: T
+            
+            if T.self == String.self {
+                guard let string = options.json5 ? elementValue.stringWhenJSON5 : elementValue.string else {
+                    throw createTypeMismatchError(type: String.self, for: codingPathNode.path(byAppending: additionalKey), value: elementValue)
+                }
+                decodedValue = string as! T
+            } else if T.self == Double.self {
+                decodedValue = try unboxFloatingPoint(from: elementValue, as: Double.self, for: arrayCodingPathNode, indexKey) as! T
+            } else if T.self == Float.self {
+                decodedValue = try unboxFloatingPoint(from: elementValue, as: Float.self, for: arrayCodingPathNode, indexKey) as! T
+            } else if T.self == Int.self {
+                let intValue: Int = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else if T.self == Int8.self {
+                let intValue: Int8 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else if T.self == Int16.self {
+                let intValue: Int16 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else if T.self == Int32.self {
+                let intValue: Int32 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else if T.self == Int64.self {
+                let intValue: Int64 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else if T.self == UInt.self {
+                let intValue: UInt = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else if T.self == UInt8.self {
+                let intValue: UInt8 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else if T.self == UInt16.self {
+                let intValue: UInt16 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else if T.self == UInt32.self {
+                let intValue: UInt32 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else if T.self == UInt64.self {
+                let intValue: UInt64 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                decodedValue = intValue as! T
+            } else {
+                #if compiler(>=6.0)
+                if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *) {
+                    if T.self == Int128.self {
+                        let intValue: Int128 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                        decodedValue = intValue as! T
+                    } else if T.self == UInt128.self {
+                        let intValue: UInt128 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
+                        decodedValue = intValue as! T
+                    } else {
+                        decodedValue = try unbox(elementValue, as: T.self, for: arrayCodingPathNode, indexKey)
+                    }
+                } else {
+                    decodedValue = try unbox(elementValue, as: T.self, for: arrayCodingPathNode, indexKey)
+                }
+                #else
+                    decodedValue = try unbox(elementValue, as: T.self, for: arrayCodingPathNode, indexKey)
+                #endif
+            }
+            
+            result.append(decodedValue)
+            index += 1
+        }
+        
+        return result
+    }
+    
+    
     func unboxString<K: CodingKey>(from value: JSON, for codingPathNode: CodingPathNode, _ additionalKey: K? = nil) throws -> String {
         try checkNotNull(value, expectedType: String.self, for: codingPathNode, additionalKey)
         
@@ -385,6 +543,28 @@ final class JSONDecoderImpl: Decoder {
         }
         
         throw self.createTypeMismatchError(type: F.self, for: codingPathNode.path(byAppending: additionalKey), value: value)
+    }
+    
+    @inline(__always)
+    private func unboxInteger<T: FixedWidthInteger>(
+        _ jsonValue: JSON,
+        for codingPathNode: CodingPathNode,
+        _ additionalKey: (some CodingKey)? = nil
+    ) throws -> T {
+        guard let int: T =  jsonValue.integer() else {
+            guard jsonValue.isNumber else {
+                throw createTypeMismatchError(
+                    type: T.self,
+                    for: codingPathNode.path(byAppending: additionalKey),
+                    value: jsonValue
+                )
+            }
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription: "Number \(jsonValue.numberValue) is not representable in Swift."
+            ))
+        }
+        return int
     }
 }
 
@@ -1459,7 +1639,7 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
     
     @inline(__always)
     private mutating func decodeInteger<T: FixedWidthInteger>(_ jsonValue: JSON) throws -> T {
-        guard let int: T =  jsonValue.integer() else {
+        guard let int: T = jsonValue.integer() else {
             guard jsonValue.isNumber else {
                 throw impl.createTypeMismatchError(type: T.self, for: currentCodingPath, value: jsonValue)
             }

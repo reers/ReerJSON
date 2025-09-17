@@ -68,7 +68,7 @@ enum CodingPathNode: Sendable {
     }
 }
 
-enum _CodingKey : CodingKey {
+enum _CodingKey: CodingKey {
     case string(String)
     case int(Int)
     case index(Int)
@@ -123,7 +123,7 @@ protocol StringDecodableDictionary {
     static var elementType: Decodable.Type { get }
 }
 
-extension Dictionary : StringDecodableDictionary where Key == String, Value: Decodable {
+extension Dictionary: StringDecodableDictionary where Key == String, Value: Decodable {
     static var elementType: Decodable.Type { return Value.self }
 }
 

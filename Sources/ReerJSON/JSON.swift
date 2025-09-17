@@ -145,6 +145,11 @@ extension JSON {
     }
     
     @inline(__always)
+    var isArray: Bool {
+        return yyjson_is_arr(pointer)
+    }
+    
+    @inline(__always)
     func integer<T: FixedWidthInteger>() -> T? {
         guard let cString = yyjson_get_raw(pointer) else { return nil }
         var convertedVal = yyjson_val()

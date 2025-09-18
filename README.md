@@ -28,9 +28,23 @@ ReerJSON is a really fast JSON parser, and it's inspired by [ZippyJSON](https://
 ![CleanShot 2025-09-18 at 13 40 05@2x](https://github.com/user-attachments/assets/3f814fa3-72b0-4005-bea5-7391105aa6dd)
 
 
-Tested with ReerJSON 0.2.0, ZippyJSON 1.2.15, IkigaJSON 2.3.2
+Tested with ReerJSON 0.3.0, ZippyJSON 1.2.15, IkigaJSON 2.3.2
 
 [Code for Benchmarks](https://github.com/Asura19/ReerJSONBenchmark)
+
+# Installation
+
+## Swift Package Manager
+
+Add dependency in `Package.swift` or project `Package Dependencies`
+```swift
+.package(url: "https://github.com/reers/ReerJSON.git", from: "0.3.0"),
+```
+
+Depend on `ReerJSON` in your target.
+```swift
+.product(name: "ReerJSON", package: "ReerJSON" ),
+```
 
 # Usage
 Just replace `JSONDecoder` with `ReerJSONDecoder` wherever you want to use it. So instead of `let decoder = JSONDecoder()`, do `let decoder = ReerJSONDecoder()`, and everything will just work. This is because `ReerJSONDecoder` has the exact same API as `JSONDecoder`. Also, don't forget to add `import ReerJSON` in files where you use it.

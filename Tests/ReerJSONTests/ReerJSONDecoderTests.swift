@@ -1909,6 +1909,80 @@ class ReerJSONTests: XCTestCase {
         XCTAssert(model4.c == [1, 2, 3])
     }
     
+    func testBasicTypeArray() throws {
+        struct Test: Decodable {
+            var double: [Double]
+            var int: [Int]
+            var string: [String]
+        }
+        
+        let data = """
+        {
+            "double": [1.1, 2.2, 3.3],
+            "int": [1, 2, 3],
+            "string": ["1", "2", "3"]
+        }
+        """.data(using: .utf8)!
+        let model = try ReerJSONDecoder().decode(Test.self, from: data)
+        XCTAssert(model.double == [1.1, 2.2, 3.3])
+        XCTAssert(model.int == [1, 2, 3])
+        XCTAssert(model.string == ["1", "2", "3"])
+    }
+    
+    func testBasicTypeArray2() throws {
+        struct Test: Decodable {
+            var double: [Double]
+            var int: [Int]
+            var string: [String]
+            
+            enum CodingKeys: String, CodingKey {
+                case double
+                case int
+                case string
+            }
+            
+            init(from decoder: any Decoder) throws {
+                let keyed = try decoder.container(keyedBy: CodingKeys.self)
+                var doubleUnkeyed = try keyed.nestedUnkeyedContainer(forKey: .double)
+                var intUnkeyed = try keyed.nestedUnkeyedContainer(forKey: .int)
+                var stringUnkeyed = try keyed.nestedUnkeyedContainer(forKey: .string)
+                
+                var doubleRet: [Double] = []
+                while !doubleUnkeyed.isAtEnd {
+                    let element = try doubleUnkeyed.decode(Double.self)
+                    doubleRet.append(element)
+                }
+                self.double = doubleRet
+                
+                var intRet: [Int] = []
+                while !intUnkeyed.isAtEnd {
+                    let element = try intUnkeyed.decode(Int.self)
+                    intRet.append(element)
+                }
+                self.int = intRet
+                
+                var stringRet: [String] = []
+                while !stringUnkeyed.isAtEnd {
+                    let element = try stringUnkeyed.decode(String.self)
+                    stringRet.append(element)
+                }
+                self.string = stringRet
+            }
+        }
+        
+        let data = """
+        {
+            "double": [1.1, 2.2, 3.3],
+            "int": [1, 2, 3],
+            "string": ["1", "2", "3"]
+        }
+        """.data(using: .utf8)!
+        let model = try ReerJSONDecoder().decode(Test.self, from: data)
+        XCTAssert(model.double == [1.1, 2.2, 3.3])
+        XCTAssert(model.int == [1, 2, 3])
+        XCTAssert(model.string == ["1", "2", "3"])
+    }
+    
     #if !os(Linux)
     @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
     func testDecodableWithConfiguration() throws {

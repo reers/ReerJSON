@@ -31,238 +31,523 @@ import yyjson
 // MARK: - JSONEncoderImpl
 
 final class JSONEncoderImpl: Encoder {
-    /// Options set on the top-level encoder.
-    fileprivate let options: ReerJSONEncoder.Options
-    var codingPathNode: CodingPathNode = .root
+    
+    // MARK: - Properties
+    
+    let options: ReerJSONEncoder.Options
     let mutDoc: UnsafeMutablePointer<yyjson_mut_doc>
-    var ownerEncoder: JSONEncoderImpl?
-    var sharedSubEncoder: JSONEncoderImpl?
-    var codingKey: (any CodingKey)?
     
-    /// Encoded value for this encoder scope.
-    private var encodedValue: UnsafeMutablePointer<yyjson_mut_val>?
-    
-    @inline(__always)
-    func takeValue() -> UnsafeMutablePointer<yyjson_mut_val>? {
-        defer { self.encodedValue = nil }
-        return self.encodedValue
-    }
-    
+    var codingPathNode: CodingPathNode
     var codingPath: [CodingKey] {
         codingPathNode.path
     }
     
+    var userInfo: [CodingUserInfoKey: Any] {
+        options.userInfo
+    }
+    
+    /// Storage for encoded values
+    private var singleValue: UnsafeMutablePointer<yyjson_mut_val>?
+    private var array: JSONFutureArray?
+    private var object: JSONFutureObject?
+    
+    // For encoder reuse optimization
+    var ownerEncoder: JSONEncoderImpl?
+    var sharedSubEncoder: JSONEncoderImpl?
+    var codingKey: (any CodingKey)?
+    
+    // MARK: - Initialization
+    
     init(
         options: ReerJSONEncoder.Options,
-        ownerEncoder: JSONEncoderImpl?,
-        codingKey: (any CodingKey)? = _CodingKey?.none,
-        mutDoc: UnsafeMutablePointer<yyjson_mut_doc>
+        mutDoc: UnsafeMutablePointer<yyjson_mut_doc>,
+        codingPathNode: CodingPathNode = .root
     ) {
         self.options = options
         self.mutDoc = mutDoc
-        self.ownerEncoder = ownerEncoder
-        self.codingKey = codingKey
-        if let owner = ownerEncoder {
-            if let key = codingKey {
-                self.codingPathNode = owner.codingPathNode.appending(key)
-            } else {
-                self.codingPathNode = owner.codingPathNode
-            }
-        } else {
-            self.codingPathNode = .root
-        }
+        self.codingPathNode = codingPathNode
     }
     
-    /// Contextual user-provided information for use during encoding.
-    var userInfo: [CodingUserInfoKey : Any] {
-        return self.options.userInfo
+    // MARK: - Value Management
+    
+    func takeValue() -> UnsafeMutablePointer<yyjson_mut_val>? {
+        if let object = self.object {
+            self.object = nil
+            return object.toYYJSONValue(doc: mutDoc, encoder: self)
+        }
+        if let array = self.array {
+            self.array = nil
+            return array.toYYJSONValue(doc: mutDoc, encoder: self)
+        }
+        defer { self.singleValue = nil }
+        return self.singleValue
     }
+    
+    // MARK: - Encoder Protocol
     
     func container<Key: CodingKey>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> {
-        let container = JSONKeyedEncodingContainer<Key>(encoder: self, codingPathNode: codingPathNode)
+        if let existingObject = self.object {
+            let container = JSONKeyedEncodingContainer<Key>(
+                encoder: self,
+                codingPathNode: codingPathNode,
+                object: existingObject
+            )
+            return KeyedEncodingContainer(container)
+        }
+        
+        if let singleValue = self.singleValue, let converted = JSONFutureObject(from: singleValue, doc: mutDoc) {
+            self.singleValue = nil
+            self.object = converted
+            let container = JSONKeyedEncodingContainer<Key>(
+                encoder: self,
+                codingPathNode: codingPathNode,
+                object: converted
+            )
+            return KeyedEncodingContainer(container)
+        }
+        
+        precondition(
+            self.singleValue == nil && self.array == nil,
+            "Attempt to push new keyed encoding container when already previously encoded at this path."
+        )
+        
+        let newObject = JSONFutureObject()
+        self.object = newObject
+        let container = JSONKeyedEncodingContainer<Key>(
+            encoder: self,
+            codingPathNode: codingPathNode,
+            object: newObject
+        )
         return KeyedEncodingContainer(container)
     }
     
     func unkeyedContainer() -> UnkeyedEncodingContainer {
-        return JSONUnkeyedEncodingContainer(encoder: self, codingPathNode: codingPathNode)
-    }
-    
-    func singleValueContainer() -> SingleValueEncodingContainer { self }
-    
-    /// Temporarily switch codingPathNode for the duration of closure.
-    @inline(__always)
-    func with<T>(path: CodingPathNode, _ body: () throws -> T) rethrows -> T {
-        let old = self.codingPathNode
-        self.codingPathNode = path
-        defer { self.codingPathNode = old }
-        return try body()
-    }
-    
-    @inline(__always)
-    func with(
-        _ encode: (JSONEncoderImpl) throws -> (),
-        for additionalKey: (some CodingKey)? = _CodingKey?.none
-    ) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
-        var encoder = getEncoder(for: additionalKey)
-        defer {
-            returnEncoder(&encoder)
+        if let existingArray = self.array {
+            return JSONUnkeyedEncodingContainer(
+                encoder: self,
+                codingPathNode: codingPathNode,
+                array: existingArray
+            )
         }
-        try encode(encoder)
-        return encoder.takeValue()
+        
+        if let singleValue = self.singleValue, let converted = JSONFutureArray(from: singleValue, doc: mutDoc) {
+            self.singleValue = nil
+            self.array = converted
+            return JSONUnkeyedEncodingContainer(
+                encoder: self,
+                codingPathNode: codingPathNode,
+                array: converted
+            )
+        }
+        
+        precondition(
+            self.singleValue == nil && self.object == nil,
+            "Attempt to push new unkeyed encoding container when already previously encoded at this path."
+        )
+        
+        let newArray = JSONFutureArray()
+        self.array = newArray
+        return JSONUnkeyedEncodingContainer(
+            encoder: self,
+            codingPathNode: codingPathNode,
+            array: newArray
+        )
     }
-
+    
+    func singleValueContainer() -> SingleValueEncodingContainer {
+        return self
+    }
+    
+    // MARK: - Encoder Reuse
+    
     @inline(__always)
-    func getEncoder(for additionalKey: CodingKey?) -> JSONEncoderImpl {
+    func getEncoder(for additionalKey: (some CodingKey)?) -> JSONEncoderImpl {
         if let additionalKey {
             if let takenEncoder = sharedSubEncoder {
                 self.sharedSubEncoder = nil
                 takenEncoder.codingKey = additionalKey
                 takenEncoder.ownerEncoder = self
                 takenEncoder.codingPathNode = self.codingPathNode.appending(additionalKey)
+                takenEncoder.singleValue = nil
+                takenEncoder.array = nil
+                takenEncoder.object = nil
                 return takenEncoder
             }
-            return JSONEncoderImpl(options: self.options, ownerEncoder: self, codingKey: additionalKey, mutDoc: mutDoc)
+            let encoder = JSONEncoderImpl(
+                options: self.options,
+                mutDoc: self.mutDoc,
+                codingPathNode: self.codingPathNode.appending(additionalKey)
+            )
+            encoder.ownerEncoder = self
+            encoder.codingKey = additionalKey
+            return encoder
         }
-
         return self
     }
-
+    
     @inline(__always)
     func returnEncoder(_ encoder: inout JSONEncoderImpl) {
         if encoder !== self, sharedSubEncoder == nil, isKnownUniquelyReferenced(&encoder) {
             encoder.codingKey = nil
-            encoder.ownerEncoder = nil // Prevent retain cycle.
+            encoder.ownerEncoder = nil
             sharedSubEncoder = encoder
         }
     }
+    
+    // MARK: - Key Transformation
+    
+    func convertedKey(_ key: some CodingKey) -> String {
+        switch options.keyEncodingStrategy {
+        case .useDefaultKeys:
+            return key.stringValue
+        case .convertToSnakeCase:
+            return Self._convertToSnakeCase(key.stringValue)
+        case .custom(let converter):
+            return converter(codingPath + [key]).stringValue
+        @unknown default:
+            return key.stringValue
+        }
+    }
+    
+    static func _convertToSnakeCase(_ stringKey: String) -> String {
+        guard !stringKey.isEmpty else { return stringKey }
+        
+        var words: [Range<String.Index>] = []
+        var wordStart = stringKey.startIndex
+        var searchRange = stringKey.index(after: wordStart)..<stringKey.endIndex
+        
+        while let upperCaseRange = stringKey.rangeOfCharacter(
+            from: CharacterSet.uppercaseLetters,
+            range: searchRange
+        ) {
+            let untilUpperCase = wordStart..<upperCaseRange.lowerBound
+            words.append(untilUpperCase)
+            
+            searchRange = upperCaseRange.lowerBound..<searchRange.upperBound
+            guard let lowerCaseRange = stringKey.rangeOfCharacter(
+                from: CharacterSet.lowercaseLetters,
+                range: searchRange
+            ) else {
+                wordStart = searchRange.lowerBound
+                break
+            }
+            
+            let nextCharacterAfterCapital = stringKey.index(after: upperCaseRange.lowerBound)
+            if lowerCaseRange.lowerBound == nextCharacterAfterCapital {
+                wordStart = upperCaseRange.lowerBound
+            } else {
+                let beforeLowerIndex = stringKey.index(before: lowerCaseRange.lowerBound)
+                words.append(upperCaseRange.lowerBound..<beforeLowerIndex)
+                wordStart = beforeLowerIndex
+            }
+            searchRange = lowerCaseRange.upperBound..<searchRange.upperBound
+        }
+        words.append(wordStart..<searchRange.upperBound)
+        let result = words.map { stringKey[$0].lowercased() }.joined(separator: "_")
+        return result
+    }
 }
 
-// MARK: - Boxing Values
+// MARK: - SingleValueEncodingContainer
+
+extension JSONEncoderImpl: SingleValueEncodingContainer {
+    
+    @inline(__always)
+    private func assertCanEncodeNewValue() {
+        precondition(
+            self.singleValue == nil && self.array == nil && self.object == nil,
+            "Attempt to encode value through single value container when previously value already encoded."
+        )
+    }
+    
+    func encodeNil() throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_null(mutDoc)
+    }
+    
+    func encode(_ value: Bool) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_bool(mutDoc, value)
+    }
+    
+    func encode(_ value: String) throws {
+        assertCanEncodeNewValue()
+        singleValue = boxString(value)
+    }
+    
+    func encode(_ value: Double) throws {
+        assertCanEncodeNewValue()
+        singleValue = try boxFloat(value)
+    }
+    
+    func encode(_ value: Float) throws {
+        assertCanEncodeNewValue()
+        singleValue = try boxFloat(value)
+    }
+    
+    func encode(_ value: Int) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_sint(mutDoc, Int64(value))
+    }
+    
+    func encode(_ value: Int8) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_sint(mutDoc, Int64(value))
+    }
+    
+    func encode(_ value: Int16) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_sint(mutDoc, Int64(value))
+    }
+    
+    func encode(_ value: Int32) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_sint(mutDoc, Int64(value))
+    }
+    
+    func encode(_ value: Int64) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_sint(mutDoc, value)
+    }
+    
+    func encode(_ value: UInt) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_uint(mutDoc, UInt64(value))
+    }
+    
+    func encode(_ value: UInt8) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_uint(mutDoc, UInt64(value))
+    }
+    
+    func encode(_ value: UInt16) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_uint(mutDoc, UInt64(value))
+    }
+    
+    func encode(_ value: UInt32) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_uint(mutDoc, UInt64(value))
+    }
+    
+    func encode(_ value: UInt64) throws {
+        assertCanEncodeNewValue()
+        singleValue = yyjson_mut_uint(mutDoc, value)
+    }
+    
+    #if compiler(>=6.0)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func encode(_ value: Int128) throws {
+        assertCanEncodeNewValue()
+        singleValue = boxString(String(value))
+    }
+    
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func encode(_ value: UInt128) throws {
+        assertCanEncodeNewValue()
+        singleValue = boxString(String(value))
+    }
+    #endif
+    
+    func encode<T: Encodable>(_ value: T) throws {
+        assertCanEncodeNewValue()
+        singleValue = try box(value)
+    }
+}
+
+// MARK: - Boxing Methods
 
 extension JSONEncoderImpl {
     
     @inline(__always)
-    func box(_ value: Bool) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_bool(mutDoc, value) }
-    
-    @inline(__always)
-    func box(_ value: Int) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_sint(mutDoc, Int64(value)) }
-    
-    @inline(__always)
-    func box(_ value: Int8) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_sint(mutDoc, Int64(value)) }
-    
-    @inline(__always)
-    func box(_ value: Int16) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_sint(mutDoc, Int64(value)) }
-    
-    @inline(__always)
-    func box(_ value: Int32) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_sint(mutDoc, Int64(value)) }
-    
-    @inline(__always)
-    func box(_ value: Int64) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_sint(mutDoc, value) }
-    
-    @inline(__always)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-    func box(_ value: Int128) -> UnsafeMutablePointer<yyjson_mut_val> {
-        let str = value.description
-        return yyjson_mut_strncpy(mutDoc, str, str.utf8.count)
-    }
-
-    @inline(__always)
-    func box(_ value: UInt) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_uint(mutDoc, UInt64(value)) }
-    
-    @inline(__always)
-    func box(_ value: UInt8) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_uint(mutDoc, UInt64(value)) }
-    
-    @inline(__always)
-    func box(_ value: UInt16) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_uint(mutDoc, UInt64(value)) }
-    
-    @inline(__always)
-    func box(_ value: UInt32) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_uint(mutDoc, UInt64(value)) }
-    
-    @inline(__always)
-    func box(_ value: UInt64) -> UnsafeMutablePointer<yyjson_mut_val> { yyjson_mut_uint(mutDoc, value) }
-    
-    @inline(__always)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-    func box(_ value: UInt128) -> UnsafeMutablePointer<yyjson_mut_val> {
-        let str = value.description
-        return yyjson_mut_strncpy(mutDoc, str, str.utf8.count)
+    func boxString(_ value: String) -> UnsafeMutablePointer<yyjson_mut_val>? {
+        // Use withCString for better performance when no null bytes present
+        // Use UTF8 view length to handle embedded null bytes correctly
+        let utf8 = value.utf8
+        let length = utf8.count
+        return utf8.withContiguousStorageIfAvailable { buffer in
+            yyjson_mut_strncpy(mutDoc, buffer.baseAddress, length)
+        } ?? value.withCString { cStr in
+            yyjson_mut_strncpy(mutDoc, cStr, length)
+        }
     }
     
     @inline(__always)
-    func box(_ value: String) -> UnsafeMutablePointer<yyjson_mut_val> {
-        return yyjson_mut_strncpy(mutDoc, value, value.utf8.count)
+    func boxFloat<T: BinaryFloatingPoint>(_ value: T, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+        guard !value.isNaN, !value.isInfinite else {
+            if case .convertToString(let posInf, let negInf, let nan) = options.nonConformingFloatEncodingStrategy {
+                if value.isNaN {
+                    return boxString(nan)
+                } else if value == T.infinity {
+                    return boxString(posInf)
+                } else {
+                    return boxString(negInf)
+                }
+            }
+            let path = codingPath + (additionalKey.map { [$0] } ?? [])
+            throw EncodingError.invalidValue(value, .init(
+                codingPath: path,
+                debugDescription: "Unable to encode \(T.self).\(value) directly in JSON."
+            ))
+        }
+        return yyjson_mut_real(mutDoc, Double(value))
     }
     
-    func box(
-        _ dict: [String: Encodable],
-        for addtionalKey: (some CodingKey)? = _CodingKey?.none
-    ) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+    func box(_ value: Encodable, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+        return try boxGeneric(value, for: additionalKey)
+    }
+    
+    func boxGeneric<T: Encodable>(_ value: T, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+        // Handle special types
+        if let date = value as? Date {
+            return try boxDate(date, for: additionalKey)
+        }
+        if let data = value as? Data {
+            return try boxData(data, for: additionalKey)
+        }
+        if let url = value as? URL {
+            return boxString(url.absoluteString)
+        }
+        if let decimal = value as? Decimal {
+            return boxDecimal(decimal)
+        }
+        
+        // Try optimized array encoding for primitive types
+        if let array = value as? EncodableArray {
+            if let optimized = try boxOptimizedArray(array, for: additionalKey) {
+                return optimized
+            }
+        }
+        
+        // Generic encoding via child encoder
+        var encoder = getEncoder(for: additionalKey)
+        defer { returnEncoder(&encoder) }
+        try value.encode(to: encoder)
+        // If nothing was encoded, return nil for top-level or empty object for nested
+        if let result = encoder.takeValue() {
+            return result
+        }
+        // For non-top-level encoding, return empty object
+        // Top-level will get nil and handle it appropriately
+        if additionalKey != nil {
+            return yyjson_mut_obj(mutDoc)
+        }
+        return nil
+    }
+    
+    func boxDate(_ date: Date, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+        switch options.dateEncodingStrategy {
+        case .deferredToDate:
+            var encoder = getEncoder(for: additionalKey)
+            defer { returnEncoder(&encoder) }
+            try date.encode(to: encoder)
+            return encoder.takeValue()
+            
+        case .secondsSince1970:
+            let seconds = date.timeIntervalSince1970
+            // If the value is a whole number, encode as integer
+            if seconds.truncatingRemainder(dividingBy: 1) == 0 && 
+               seconds >= Double(Int64.min) && seconds <= Double(Int64.max) {
+                return yyjson_mut_sint(mutDoc, Int64(seconds))
+            }
+            return try boxFloat(seconds, for: additionalKey)
+            
+        case .millisecondsSince1970:
+            let ms = date.timeIntervalSince1970 * 1000.0
+            // If the value is a whole number, encode as integer
+            if ms.truncatingRemainder(dividingBy: 1) == 0 &&
+               ms >= Double(Int64.min) && ms <= Double(Int64.max) {
+                return yyjson_mut_sint(mutDoc, Int64(ms))
+            }
+            return try boxFloat(ms, for: additionalKey)
+            
+        case .iso8601:
+            return boxString(_iso8601Formatter.string(from: date))
+            
+        case .formatted(let formatter):
+            return boxString(formatter.string(from: date))
+            
+        case .custom(let closure):
+            var encoder = getEncoder(for: additionalKey)
+            defer { returnEncoder(&encoder) }
+            try closure(date, encoder)
+            return encoder.takeValue() ?? yyjson_mut_obj(mutDoc)
+            
+        @unknown default:
+            fatalError("Unknown date encoding strategy")
+        }
+    }
+    
+    func boxData(_ data: Data, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+        switch options.dataEncodingStrategy {
+        case .deferredToData:
+            var encoder = getEncoder(for: additionalKey)
+            defer { returnEncoder(&encoder) }
+            try data.encode(to: encoder)
+            return encoder.takeValue()
+            
+        case .base64:
+            return boxString(data.base64EncodedString())
+            
+        case .custom(let closure):
+            var encoder = getEncoder(for: additionalKey)
+            defer { returnEncoder(&encoder) }
+            try closure(data, encoder)
+            return encoder.takeValue() ?? yyjson_mut_obj(mutDoc)
+            
+        @unknown default:
+            fatalError("Unknown data encoding strategy")
+        }
+    }
+    
+    func boxDecimal(_ decimal: Decimal) -> UnsafeMutablePointer<yyjson_mut_val>? {
+        // Output Decimal as raw number to preserve precision
+        let description = decimal.description
+        return description.withCString { cStr in
+            yyjson_mut_rawcpy(mutDoc, cStr)
+        }
+    }
+    
+    func boxDictionary(_ dict: [String: Encodable], for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
         let obj = yyjson_mut_obj(mutDoc)
-        for (rawKey, value) in dict {
-            let transformedKey = transformKey(rawKey)
-            let path = codingPathNode.appending(_CodingKey(stringValue: rawKey)!)
-            let encoded = try with(path: path) { try box(value) }
-            yyjson_mut_obj_add(obj, yyjson_mut_strcpy(mutDoc, transformedKey), encoded)
+        
+        // Sort keys if needed
+        var keys = Array(dict.keys)
+        if options.outputFormatting.contains(.sortedKeys) {
+            keys.sort(by: JSONFutureObject.sortedKeyComparator)
+        }
+        
+        for key in keys {
+            guard let value = dict[key] else { continue }
+            // Do NOT apply key conversion to dictionary string keys
+            // Key conversion only applies to CodingKeys from types
+            let keyVal = boxString(key)
+            
+            var encoder = getEncoder(for: _CodingKey(stringValue: key))
+            defer { returnEncoder(&encoder) }
+            let encodedValue = try encoder.box(value, for: _CodingKey(stringValue: key))
+            yyjson_mut_obj_add(obj, keyVal, encodedValue)
         }
         return obj
     }
     
-    func box(
-        _ value: Encodable,
-        for additionalKey: (some CodingKey)? = _CodingKey?.none
-    ) throws -> UnsafeMutablePointer<yyjson_mut_val> {
-        return try _box(value, for: additionalKey) ?? yyjson_mut_obj(mutDoc)
-    }
-    
-// Floating point boxing helpers
-    @inline(__always)
-    func boxFloatingPoint<T: BinaryFloatingPoint & CustomStringConvertible>(
-        _ float: T,
-        for additionalKey: (some CodingKey)? = _CodingKey?.none
-    ) throws -> UnsafeMutablePointer<yyjson_mut_val> {
-        guard !float.isNaN, !float.isInfinite else {
-            if case .convertToString(let posInfString, let negInfString, let nanString) = options.nonConformingFloatEncodingStrategy {
-                switch float {
-                case T.infinity:
-                    return box(posInfString)
-                case -T.infinity:
-                    return box(negInfString)
-                default:
-                    return box(nanString)
-                }
-            }
-            throw cannotEncodeNumber(float, encoder: self, additionalKey)
-        }
-        // Use number for finite values
-        return yyjson_mut_real(mutDoc, Double(float))
-    }
-    
-    @inline(__always)
-    func boxFloat(_ value: Double) throws -> UnsafeMutablePointer<yyjson_mut_val> {
-        try boxFloatingPoint(value)
-    }
-    
-    /// 优化的数组编码方法
-    /// 相比 Foundation 的复杂优化，yyjson 的 C 实现已经足够高效
-    func boxOptimizedArray(
-        _ array: EncodableArray,
-        for additionalKey: (some CodingKey)? = _CodingKey?.none
-    ) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+    func boxOptimizedArray(_ array: EncodableArray, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
         let arr = yyjson_mut_arr(mutDoc)
+        
         if let a = array as? [Bool] {
             for v in a { yyjson_mut_arr_append(arr, yyjson_mut_bool(mutDoc, v)) }
             return arr
         }
         if let a = array as? [String] {
-            for v in a { yyjson_mut_arr_append(arr, yyjson_mut_strncpy(mutDoc, v, v.utf8.count)) }
+            for v in a { yyjson_mut_arr_append(arr, boxString(v)) }
             return arr
         }
         if let a = array as? [Double] {
-            for v in a { yyjson_mut_arr_append(arr, try boxFloatingPoint(v)) }
+            for v in a { yyjson_mut_arr_append(arr, try boxFloat(v, for: additionalKey)) }
             return arr
         }
         if let a = array as? [Float] {
-            for v in a { yyjson_mut_arr_append(arr, try boxFloatingPoint(v)) }
+            for v in a { yyjson_mut_arr_append(arr, try boxFloat(v, for: additionalKey)) }
             return arr
         }
         if let a = array as? [Int] {
@@ -305,329 +590,195 @@ extension JSONEncoderImpl {
             for v in a { yyjson_mut_arr_append(arr, yyjson_mut_uint(mutDoc, v)) }
             return arr
         }
+        
         #if compiler(>=6.0)
         if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *), let a = array as? [Int128] {
-            for v in a { let s = v.description; yyjson_mut_arr_append(arr, yyjson_mut_strncpy(mutDoc, s, s.utf8.count)) }
+            for v in a { yyjson_mut_arr_append(arr, boxString(String(v))) }
             return arr
         }
         if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *), let a = array as? [UInt128] {
-            for v in a { let s = v.description; yyjson_mut_arr_append(arr, yyjson_mut_strncpy(mutDoc, s, s.utf8.count)) }
+            for v in a { yyjson_mut_arr_append(arr, boxString(String(v))) }
             return arr
         }
         #endif
+        
         return nil
-    }
-  
-    
-    func _box<T: Encodable>(
-        _ value: T,
-        for additionalKey: (some CodingKey)? = _CodingKey?.none
-    ) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
-        if let date = value as? Date {
-            return try boxDate(date, for: additionalKey)
-        } else if let data = value as? Data {
-            return try boxData(data, for: additionalKey)
-        } else if let url = value as? URL {
-            return box(url.absoluteString)
-        } else if let decimal = value as? Decimal {
-            return box(decimal.description)
-        } else if let encodable = value as? StringEncodableDictionary {
-            return try box(encodable as! [String: Encodable], for: additionalKey)
-        } else if let array = value as? EncodableArray {
-            // 使用 yyjson 直接编码数组，无需手动优化
-            if let optimized = try boxOptimizedArray(array, for: additionalKey) { return optimized }
-        }
-
-        // Fallback: encode into a child encoder and return its value
-        if let key = additionalKey {
-            return try with({ child in
-                try value.encode(to: child)
-            }, for: key)
-        } else {
-            let child = JSONEncoderImpl(options: self.options, ownerEncoder: self, mutDoc: mutDoc)
-            try value.encode(to: child)
-            return child.takeValue()
-        }
-        
-        // Unreachable; kept earlier for potential specialization paths
-        // return try boxEncodable(value)
-    }
-    
-    func boxEncodable<T: Encodable>(_ value: T) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
-        let depth = codingPathNode.depth
-        if depth > 512 {
-            var errorUserInfo: [String: Any] = [:]
-            errorUserInfo["NSJSONEncodingDepthErrorKey"] = codingPath
-            throw EncodingError.invalidValue(value, EncodingError.Context(
-                codingPath: codingPath,
-                debugDescription: "Too many nested containers",
-                underlyingError: NSError(domain: "NSCocoaErrorDomain", code: 512, userInfo: errorUserInfo)
-            ))
-        }
-        
-        let encoded = try boxAnyValue(value)
-        return encoded
-    }
-    
-    func boxAnyValue<T: Encodable>(_ value: T) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
-        if let value = value as? Bool {
-            return yyjson_mut_bool(mutDoc, value)
-        } else if let value = value as? Int {
-            return yyjson_mut_sint(mutDoc, Int64(value))
-        } else if let value = value as? Int8 {
-            return yyjson_mut_sint(mutDoc, Int64(value))
-        } else if let value = value as? Int16 {
-            return yyjson_mut_sint(mutDoc, Int64(value))
-        } else if let value = value as? Int32 {
-            return yyjson_mut_sint(mutDoc, Int64(value))
-        } else if let value = value as? Int64 {
-            return yyjson_mut_sint(mutDoc, value)
-        } else if let value = value as? UInt {
-            return yyjson_mut_uint(mutDoc, UInt64(value))
-        } else if let value = value as? UInt8 {
-            return yyjson_mut_uint(mutDoc, UInt64(value))
-        } else if let value = value as? UInt16 {
-            return yyjson_mut_uint(mutDoc, UInt64(value))
-        } else if let value = value as? UInt32 {
-            return yyjson_mut_uint(mutDoc, UInt64(value))
-        } else if let value = value as? UInt64 {
-            return yyjson_mut_uint(mutDoc, value)
-        
-        }
-#if compiler(>=6.0)
-        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *), let v = value as? Int128 {
-            return yyjson_mut_strcpy(mutDoc, String(v))
-        }
-        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *), let v = value as? UInt128 {
-            return yyjson_mut_strcpy(mutDoc, String(v))
-        }
-#endif
-        if let value = value as? Float {
-            return try boxFloat(Double(value))
-        } else if let value = value as? Double {
-            return try boxFloat(value)
-        } else if let value = value as? String {
-            return yyjson_mut_strcpy(mutDoc, value)
-        } else {
-            let encoder = JSONEncoderImpl(options: options, ownerEncoder: self, mutDoc: mutDoc)
-            try value.encode(to: encoder)
-            return encoder.getEncodedValue()
-        }
-    }
-    
-    func boxDate(
-        _ date: Date,
-        for additionalKey: (some CodingKey)? = _CodingKey?.none
-    ) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
-        switch options.dateEncodingStrategy {
-        case .deferredToDate:
-            let encoder = JSONEncoderImpl(options: options, ownerEncoder: self, mutDoc: mutDoc)
-            try date.encode(to: encoder)
-            return encoder.getEncodedValue()
-            
-        case .secondsSince1970:
-            return yyjson_mut_real(mutDoc, date.timeIntervalSince1970)
-            
-        case .millisecondsSince1970:
-            return yyjson_mut_real(mutDoc, date.timeIntervalSince1970 * 1000.0)
-            
-        case .iso8601:
-            return yyjson_mut_strcpy(mutDoc, _iso8601Formatter.string(from: date))
-            
-        case .formatted(let formatter):
-            return yyjson_mut_strcpy(mutDoc, formatter.string(from: date))
-            
-        case .custom(let closure):
-            let encoder = JSONEncoderImpl(options: options, ownerEncoder: self, mutDoc: mutDoc)
-            try closure(date, encoder)
-            return encoder.getEncodedValue()
-        @unknown default:
-            fatalError()
-        }
-    }
-    
-    func boxData(_ data: Data, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
-        switch options.dataEncodingStrategy {
-        case .deferredToData:
-            let encoder = JSONEncoderImpl(options: options, ownerEncoder: self, mutDoc: mutDoc)
-            try data.encode(to: encoder)
-            return encoder.getEncodedValue()
-            
-        case .base64:
-            return yyjson_mut_strcpy(mutDoc, data.base64EncodedString())
-            
-        case .custom(let closure):
-            let encoder = JSONEncoderImpl(options: options, ownerEncoder: self, mutDoc: mutDoc)
-            try closure(data, encoder)
-            return encoder.getEncodedValue()
-        @unknown default:
-            fatalError()
-        }
-    }
-    
-    func boxURL(_ url: URL) -> UnsafeMutablePointer<yyjson_mut_val>? {
-        return yyjson_mut_strcpy(mutDoc, url.absoluteString)
-    }
-    
-    func boxDecimal(_ decimal: Decimal) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
-        return yyjson_mut_strcpy(mutDoc, decimal.description)
-    }
-    
-    func setEncodedValue(_ value: UnsafeMutablePointer<yyjson_mut_val>?) { self.encodedValue = value }
-    func getEncodedValue() -> UnsafeMutablePointer<yyjson_mut_val>? { self.encodedValue }
-    
-    func transformKey(_ key: String) -> String {
-        switch options.keyEncodingStrategy {
-        case .useDefaultKeys:
-            return key
-        case .convertToSnakeCase:
-            return JSONEncoderImpl.convertToSnakeCase(key)
-        case .custom(let closure):
-            return closure(codingPath + [_CodingKey(stringValue: key)!]).stringValue
-        @unknown default:
-            return key
-        }
-    }
-    
-    static func convertToSnakeCase(_ key: String) -> String {
-        guard !key.isEmpty else { return key }
-        
-        var result = ""
-        var currentIndex = key.startIndex
-        let endIndex = key.endIndex
-        
-        while currentIndex < endIndex {
-            let character = key[currentIndex]
-            
-            if character.isUppercase {
-                if currentIndex != key.startIndex {
-                    result += "_"
-                }
-                result += character.lowercased()
-            } else {
-                result += String(character)
-            }
-            
-            currentIndex = key.index(after: currentIndex)
-        }
-        
-        return result
-    }
-    
-    @inline(never)
-    fileprivate func cannotEncodeNumber<T: BinaryFloatingPoint>(
-        _ float: T,
-        encoder: JSONEncoderImpl,
-        _ additionalKey: (some CodingKey)?
-    ) -> EncodingError {
-        let path = encoder.codingPath + (additionalKey.map { [$0] } ?? [])
-        return EncodingError.invalidValue(float, .init(
-            codingPath: path,
-            debugDescription: "Unable to encode \(T.self).\(float) directly in JSON."
-        ))
     }
 }
 
-// MARK: - SingleValueEncodingContainer
+// MARK: - Future Types for Deferred Resolution
 
-extension JSONEncoderImpl: SingleValueEncodingContainer {
+/// Represents a JSON object with potentially unresolved nested values
+final class JSONFutureObject {
+    var dict: [String: JSONFuture] = [:]
+    
+    init() {
+        dict.reserveCapacity(8)
+    }
+    
+    init?(from val: UnsafeMutablePointer<yyjson_mut_val>?, doc: UnsafeMutablePointer<yyjson_mut_doc>) {
+        guard let val = val, yyjson_mut_is_obj(val) else { return nil }
+        
+        // Convert existing yyjson object to JSONFutureObject
+        dict.reserveCapacity(8)
+        var iter = yyjson_mut_obj_iter()
+        yyjson_mut_obj_iter_init(val, &iter)
+        while let key = yyjson_mut_obj_iter_next(&iter) {
+            if let keyStr = yyjson_mut_get_str(key) {
+                let value = yyjson_mut_obj_iter_get_val(key)
+                dict[String(cString: keyStr)] = .value(value)
+            }
+        }
+    }
+    
+    /// Creates a JSONFutureObject from an existing yyjson_mut_val object
+    /// This is used when we need to convert an already-encoded object back to a mutable form
+    static func from(_ val: UnsafeMutablePointer<yyjson_mut_val>, doc: UnsafeMutablePointer<yyjson_mut_doc>) -> JSONFutureObject {
+        let futureObj = JSONFutureObject()
+        
+        // Iterate through the existing object and copy key-value pairs
+        var iter = yyjson_mut_obj_iter()
+        yyjson_mut_obj_iter_init(val, &iter)
+        while let key = yyjson_mut_obj_iter_next(&iter) {
+            if let keyStr = yyjson_mut_get_str(key) {
+                let value = yyjson_mut_obj_iter_get_val(key)
+                futureObj.dict[String(cString: keyStr)] = .value(value)
+            }
+        }
+        
+        return futureObj
+    }
+    
     @inline(__always)
-    private func assertCanEncodeNewValue() {
-        precondition(self.encodedValue == nil, "Attempt to encode value through single value container when previously value already encoded.")
+    func set(_ value: UnsafeMutablePointer<yyjson_mut_val>?, for key: String) {
+        dict[key] = .value(value)
     }
     
-    func encodeNil() throws {
-        assertCanEncodeNewValue()
-        encodedValue = yyjson_mut_null(mutDoc)
+    @inline(__always)
+    func setArray(for key: String) -> JSONFutureArray {
+        if case .nestedArray(let arr) = dict[key] {
+            return arr
+        }
+        let arr = JSONFutureArray()
+        dict[key] = .nestedArray(arr)
+        return arr
     }
     
-    func encode(_ value: Bool) throws {
-        assertCanEncodeNewValue()
-        encodedValue = yyjson_mut_bool(mutDoc, value)
+    @inline(__always)
+    func setObject(for key: String) -> JSONFutureObject {
+        if case .nestedObject(let obj) = dict[key] {
+            return obj
+        }
+        let obj = JSONFutureObject()
+        dict[key] = .nestedObject(obj)
+        return obj
     }
     
-    func encode(_ value: String) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
+    func toYYJSONValue(doc: UnsafeMutablePointer<yyjson_mut_doc>, encoder: JSONEncoderImpl) -> UnsafeMutablePointer<yyjson_mut_val>? {
+        let obj = yyjson_mut_obj(doc)
+        
+        // Get keys, sort if needed
+        var keys = Array(dict.keys)
+        if encoder.options.outputFormatting.contains(.sortedKeys) {
+            keys.sort(by: Self.sortedKeyComparator)
+        }
+        
+        for key in keys {
+            guard let future = dict[key] else { continue }
+            let keyVal = encoder.boxString(key)
+            let val = future.toYYJSONValue(doc: doc, encoder: encoder)
+            yyjson_mut_obj_add(obj, keyVal, val)
+        }
+        return obj
     }
     
-    func encode(_ value: Double) throws {
-        assertCanEncodeNewValue()
-        encodedValue = try boxFloatingPoint(value)
+    /// Comparator for sorted keys - follows localized, numeric comparison rules
+    static let sortedKeyComparator: (String, String) -> Bool = { lhs, rhs in
+        lhs.compare(rhs, options: [.numeric], locale: .current) == .orderedAscending
+    }
+}
+
+/// Represents a JSON array with potentially unresolved nested values
+final class JSONFutureArray {
+    var array: [JSONFuture] = []
+    
+    init() {
+        array.reserveCapacity(8)
     }
     
-    func encode(_ value: Float) throws {
-        assertCanEncodeNewValue()
-        encodedValue = try boxFloatingPoint(value)
+    init?(from val: UnsafeMutablePointer<yyjson_mut_val>?, doc: UnsafeMutablePointer<yyjson_mut_doc>) {
+        guard let val = val, yyjson_mut_is_arr(val) else { return nil }
+        
+        // Convert existing yyjson array to JSONFutureArray
+        array.reserveCapacity(8)
+        var iter = yyjson_mut_arr_iter()
+        yyjson_mut_arr_iter_init(val, &iter)
+        while let element = yyjson_mut_arr_iter_next(&iter) {
+            array.append(.value(element))
+        }
     }
     
-    func encode(_ value: Int) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
+    @inline(__always)
+    func append(_ value: UnsafeMutablePointer<yyjson_mut_val>?) {
+        array.append(.value(value))
     }
     
-    func encode(_ value: Int8) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
+    @inline(__always)
+    func appendArray() -> JSONFutureArray {
+        let arr = JSONFutureArray()
+        array.append(.nestedArray(arr))
+        return arr
     }
     
-    func encode(_ value: Int16) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
+    @inline(__always)
+    func appendObject() -> JSONFutureObject {
+        let obj = JSONFutureObject()
+        array.append(.nestedObject(obj))
+        return obj
     }
     
-    func encode(_ value: Int32) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
+    @inline(__always)
+    func insert(_ value: UnsafeMutablePointer<yyjson_mut_val>?, at index: Int) {
+        array.insert(.value(value), at: index)
     }
     
-    func encode(_ value: Int64) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
+    var count: Int { array.count }
+    
+    func toYYJSONValue(doc: UnsafeMutablePointer<yyjson_mut_doc>, encoder: JSONEncoderImpl) -> UnsafeMutablePointer<yyjson_mut_val>? {
+        let arr = yyjson_mut_arr(doc)
+        for future in array {
+            let val = future.toYYJSONValue(doc: doc, encoder: encoder)
+            yyjson_mut_arr_append(arr, val)
+        }
+        return arr
+    }
+}
+
+/// Represents either a resolved value or a nested container
+enum JSONFuture {
+    case value(UnsafeMutablePointer<yyjson_mut_val>?)
+    case nestedArray(JSONFutureArray)
+    case nestedObject(JSONFutureObject)
+    
+    func toYYJSONValue(doc: UnsafeMutablePointer<yyjson_mut_doc>, encoder: JSONEncoderImpl) -> UnsafeMutablePointer<yyjson_mut_val>? {
+        switch self {
+        case .value(let val):
+            return val
+        case .nestedArray(let arr):
+            return arr.toYYJSONValue(doc: doc, encoder: encoder)
+        case .nestedObject(let obj):
+            return obj.toYYJSONValue(doc: doc, encoder: encoder)
+        }
     }
     
-    func encode(_ value: UInt) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
+    var array: JSONFutureArray? {
+        if case .nestedArray(let arr) = self { return arr }
+        return nil
     }
     
-    func encode(_ value: UInt8) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
-    }
-    
-    func encode(_ value: UInt16) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
-    }
-    
-    func encode(_ value: UInt32) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
-    }
-    
-    func encode(_ value: UInt64) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
-    }
-    
-    #if compiler(>=6.0)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-    func encode(_ value: Int128) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
-    }
-    
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-    func encode(_ value: UInt128) throws {
-        assertCanEncodeNewValue()
-        encodedValue = box(value)
-    }
-    #endif
-    
-    func encode<T: Encodable>(_ value: T) throws {
-        assertCanEncodeNewValue()
-        encodedValue = try _box(value)
+    var object: JSONFutureObject? {
+        if case .nestedObject(let obj) = self { return obj }
+        return nil
     }
 }
 
@@ -638,169 +789,170 @@ private struct JSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContainerP
     
     let encoder: JSONEncoderImpl
     let codingPathNode: CodingPathNode
-    private let object: UnsafeMutablePointer<yyjson_mut_val>
+    let object: JSONFutureObject
     
     var codingPath: [CodingKey] {
         codingPathNode.path
     }
     
-    init(encoder: JSONEncoderImpl, codingPathNode: CodingPathNode) {
+    init(encoder: JSONEncoderImpl, codingPathNode: CodingPathNode, object: JSONFutureObject) {
         self.encoder = encoder
         self.codingPathNode = codingPathNode
-        self.object = yyjson_mut_obj(encoder.mutDoc)
-        encoder.setEncodedValue(object)
+        self.object = object
+    }
+    
+    @inline(__always)
+    private func converted(_ key: some CodingKey) -> String {
+        encoder.convertedKey(key)
     }
     
     mutating func encodeNil(forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let value = yyjson_mut_null(encoder.mutDoc)
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), value)
+        object.set(yyjson_mut_null(encoder.mutDoc), for: converted(key))
     }
     
     mutating func encode(_ value: Bool, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_bool(encoder.mutDoc, value)
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_bool(encoder.mutDoc, value), for: converted(key))
     }
     
     mutating func encode(_ value: String, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_strcpy(encoder.mutDoc, value)
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(encoder.boxString(value), for: converted(key))
     }
     
     mutating func encode(_ value: Double, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = try encoder.boxFloat(value)
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(try encoder.boxFloat(value, for: key), for: converted(key))
     }
     
     mutating func encode(_ value: Float, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = try encoder.boxFloat(Double(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(try encoder.boxFloat(value, for: key), for: converted(key))
     }
     
     mutating func encode(_ value: Int, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_sint(encoder.mutDoc, Int64(value)), for: converted(key))
     }
     
     mutating func encode(_ value: Int8, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_sint(encoder.mutDoc, Int64(value)), for: converted(key))
     }
     
     mutating func encode(_ value: Int16, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_sint(encoder.mutDoc, Int64(value)), for: converted(key))
     }
     
     mutating func encode(_ value: Int32, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_sint(encoder.mutDoc, Int64(value)), for: converted(key))
     }
     
     mutating func encode(_ value: Int64, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, value)
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_sint(encoder.mutDoc, value), for: converted(key))
     }
     
     mutating func encode(_ value: UInt, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_uint(encoder.mutDoc, UInt64(value)), for: converted(key))
     }
     
     mutating func encode(_ value: UInt8, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_uint(encoder.mutDoc, UInt64(value)), for: converted(key))
     }
     
     mutating func encode(_ value: UInt16, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_uint(encoder.mutDoc, UInt64(value)), for: converted(key))
     }
     
     mutating func encode(_ value: UInt32, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_uint(encoder.mutDoc, UInt64(value)), for: converted(key))
     }
     
     mutating func encode(_ value: UInt64, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, value)
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(yyjson_mut_uint(encoder.mutDoc, value), for: converted(key))
     }
     
     #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func encode(_ value: Int128, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_strcpy(encoder.mutDoc, String(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(encoder.boxString(String(value)), for: converted(key))
     }
     
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func encode(_ value: UInt128, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = yyjson_mut_strcpy(encoder.mutDoc, String(value))
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        object.set(encoder.boxString(String(value)), for: converted(key))
     }
     #endif
     
     mutating func encode<T: Encodable>(_ value: T, forKey key: K) throws {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let mutValue = try encoder.with(path: codingPathNode.appending(key)) {
-            try encoder.box(value)
-        }
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), mutValue)
+        var subEncoder = encoder.getEncoder(for: key)
+        defer { encoder.returnEncoder(&subEncoder) }
+        let encoded = try subEncoder.box(value, for: key)
+        object.set(encoded, for: converted(key))
     }
     
     mutating func nestedContainer<NestedKey: CodingKey>(keyedBy keyType: NestedKey.Type, forKey key: K) -> KeyedEncodingContainer<NestedKey> {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let nestedObject = yyjson_mut_obj(encoder.mutDoc)
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), nestedObject)
+        let convertedKey = converted(key)
+        let nestedObject: JSONFutureObject
         
-        let nestedEncoder = JSONEncoderImpl(options: encoder.options, ownerEncoder: encoder, codingKey: key, mutDoc: encoder.mutDoc)
-        nestedEncoder.setEncodedValue(nestedObject)
+        if let existing = object.dict[convertedKey] {
+            if let obj = existing.object {
+                nestedObject = obj
+            } else if case .value(let val) = existing, let val = val, yyjson_mut_is_obj(val) {
+                // Convert existing yyjson object value to JSONFutureObject for further encoding
+                let converted = JSONFutureObject.from(val, doc: encoder.mutDoc)
+                object.dict[convertedKey] = .nestedObject(converted)
+                nestedObject = converted
+            } else {
+                preconditionFailure(
+                    "Attempt to re-encode into nested KeyedEncodingContainer<\(Key.self)> for key \"\(convertedKey)\" is invalid: non-keyed container already encoded for this key"
+                )
+            }
+        } else {
+            nestedObject = object.setObject(for: convertedKey)
+        }
         
-        let container = JSONKeyedEncodingContainer<NestedKey>(encoder: nestedEncoder, codingPathNode: codingPathNode.appending(key))
+        let container = JSONKeyedEncodingContainer<NestedKey>(
+            encoder: encoder,
+            codingPathNode: codingPathNode.appending(key),
+            object: nestedObject
+        )
         return KeyedEncodingContainer(container)
     }
     
     mutating func nestedUnkeyedContainer(forKey key: K) -> UnkeyedEncodingContainer {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let nestedArray = yyjson_mut_arr(encoder.mutDoc)
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), nestedArray)
+        let convertedKey = converted(key)
+        let nestedArray: JSONFutureArray
         
-        let nestedEncoder = JSONEncoderImpl(options: encoder.options, ownerEncoder: encoder, codingKey: key, mutDoc: encoder.mutDoc)
-        nestedEncoder.setEncodedValue(nestedArray)
+        if let existing = object.dict[convertedKey] {
+            if let arr = existing.array {
+                nestedArray = arr
+            } else {
+                preconditionFailure(
+                    "Attempt to re-encode into nested UnkeyedEncodingContainer for key \"\(convertedKey)\" is invalid: keyed container/single value already encoded for this key"
+                )
+            }
+        } else {
+            nestedArray = object.setArray(for: convertedKey)
+        }
         
-        return JSONUnkeyedEncodingContainer(encoder: nestedEncoder, codingPathNode: codingPathNode.appending(key), array: nestedArray!)
+        return JSONUnkeyedEncodingContainer(
+            encoder: encoder,
+            codingPathNode: codingPathNode.appending(key),
+            array: nestedArray
+        )
     }
     
     mutating func superEncoder() -> Encoder {
-        return superEncoder(forKey: _CodingKey.super as! K)
+        return JSONReferencingEncoder(
+            encoder: encoder,
+            key: _CodingKey.super,
+            convertedKey: converted(_CodingKey.super),
+            object: object
+        )
     }
     
     mutating func superEncoder(forKey key: K) -> Encoder {
-        let transformedKey = encoder.transformKey(key.stringValue)
-        let superObject = yyjson_mut_obj(encoder.mutDoc)
-        yyjson_mut_obj_add(object, yyjson_mut_strcpy(encoder.mutDoc, transformedKey), superObject)
-        
-        let superEncoder = JSONEncoderImpl(options: encoder.options, ownerEncoder: encoder, codingKey: key, mutDoc: encoder.mutDoc)
-        superEncoder.setEncodedValue(superObject)
-        
-        return superEncoder
+        return JSONReferencingEncoder(
+            encoder: encoder,
+            key: key,
+            convertedKey: converted(key),
+            object: object
+        )
     }
 }
 
@@ -809,159 +961,330 @@ private struct JSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContainerP
 private struct JSONUnkeyedEncodingContainer: UnkeyedEncodingContainer {
     let encoder: JSONEncoderImpl
     let codingPathNode: CodingPathNode
-    private let array: UnsafeMutablePointer<yyjson_mut_val>
-    private var _count = 0
+    let array: JSONFutureArray
     
     var codingPath: [CodingKey] {
         codingPathNode.path
     }
     
     var count: Int {
-        return _count
+        array.count
     }
     
-    init(encoder: JSONEncoderImpl, codingPathNode: CodingPathNode) {
-        self.encoder = encoder
-        self.codingPathNode = codingPathNode
-        self.array = yyjson_mut_arr(encoder.mutDoc)
-        encoder.setEncodedValue(array)
-    }
-    
-    init(encoder: JSONEncoderImpl, codingPathNode: CodingPathNode, array: UnsafeMutablePointer<yyjson_mut_val>) {
+    init(encoder: JSONEncoderImpl, codingPathNode: CodingPathNode, array: JSONFutureArray) {
         self.encoder = encoder
         self.codingPathNode = codingPathNode
         self.array = array
     }
     
-    private mutating func appendValue(_ value: UnsafeMutablePointer<yyjson_mut_val>?) {
-        yyjson_mut_arr_append(array, value)
-        _count += 1
-    }
-    
     mutating func encodeNil() throws {
-        let value = yyjson_mut_null(encoder.mutDoc)
-        appendValue(value)
+        array.append(yyjson_mut_null(encoder.mutDoc))
     }
     
     mutating func encode(_ value: Bool) throws {
-        let mutValue = yyjson_mut_bool(encoder.mutDoc, value)
-        appendValue(mutValue)
+        array.append(yyjson_mut_bool(encoder.mutDoc, value))
     }
     
     mutating func encode(_ value: String) throws {
-        let mutValue = yyjson_mut_strcpy(encoder.mutDoc, value)
-        appendValue(mutValue)
+        array.append(encoder.boxString(value))
     }
     
     mutating func encode(_ value: Double) throws {
-        let mutValue = try encoder.boxFloat(value)
-        appendValue(mutValue)
+        array.append(try encoder.boxFloat(value, for: _CodingKey(index: count)))
     }
     
     mutating func encode(_ value: Float) throws {
-        let mutValue = try encoder.boxFloat(Double(value))
-        appendValue(mutValue)
+        array.append(try encoder.boxFloat(value, for: _CodingKey(index: count)))
     }
     
     mutating func encode(_ value: Int) throws {
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        appendValue(mutValue)
+        array.append(yyjson_mut_sint(encoder.mutDoc, Int64(value)))
     }
     
     mutating func encode(_ value: Int8) throws {
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        appendValue(mutValue)
+        array.append(yyjson_mut_sint(encoder.mutDoc, Int64(value)))
     }
     
     mutating func encode(_ value: Int16) throws {
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        appendValue(mutValue)
+        array.append(yyjson_mut_sint(encoder.mutDoc, Int64(value)))
     }
     
     mutating func encode(_ value: Int32) throws {
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, Int64(value))
-        appendValue(mutValue)
+        array.append(yyjson_mut_sint(encoder.mutDoc, Int64(value)))
     }
     
     mutating func encode(_ value: Int64) throws {
-        let mutValue = yyjson_mut_sint(encoder.mutDoc, value)
-        appendValue(mutValue)
+        array.append(yyjson_mut_sint(encoder.mutDoc, value))
     }
     
     mutating func encode(_ value: UInt) throws {
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        appendValue(mutValue)
+        array.append(yyjson_mut_uint(encoder.mutDoc, UInt64(value)))
     }
     
     mutating func encode(_ value: UInt8) throws {
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        appendValue(mutValue)
+        array.append(yyjson_mut_uint(encoder.mutDoc, UInt64(value)))
     }
     
     mutating func encode(_ value: UInt16) throws {
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        appendValue(mutValue)
+        array.append(yyjson_mut_uint(encoder.mutDoc, UInt64(value)))
     }
     
     mutating func encode(_ value: UInt32) throws {
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, UInt64(value))
-        appendValue(mutValue)
+        array.append(yyjson_mut_uint(encoder.mutDoc, UInt64(value)))
     }
     
     mutating func encode(_ value: UInt64) throws {
-        let mutValue = yyjson_mut_uint(encoder.mutDoc, value)
-        appendValue(mutValue)
+        array.append(yyjson_mut_uint(encoder.mutDoc, value))
     }
     
     #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func encode(_ value: Int128) throws {
-        let mutValue = yyjson_mut_strcpy(encoder.mutDoc, String(value))
-        appendValue(mutValue)
+        array.append(encoder.boxString(String(value)))
     }
     
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func encode(_ value: UInt128) throws {
-        let mutValue = yyjson_mut_strcpy(encoder.mutDoc, String(value))
-        appendValue(mutValue)
+        array.append(encoder.boxString(String(value)))
     }
     #endif
     
     mutating func encode<T: Encodable>(_ value: T) throws {
-        let mutValue = try encoder.with(path: codingPathNode.appending(index: count)) {
-            try encoder.box(value)
-        }
-        appendValue(mutValue)
+        let key = _CodingKey(index: count)
+        var subEncoder = encoder.getEncoder(for: key)
+        defer { encoder.returnEncoder(&subEncoder) }
+        let encoded = try subEncoder.box(value, for: key)
+        array.append(encoded)
     }
     
     mutating func nestedContainer<NestedKey: CodingKey>(keyedBy keyType: NestedKey.Type) -> KeyedEncodingContainer<NestedKey> {
-        let nestedObject = yyjson_mut_obj(encoder.mutDoc)
-        appendValue(nestedObject)
-        
-        let nestedEncoder = JSONEncoderImpl(options: encoder.options, ownerEncoder: encoder, codingKey: _CodingKey(index: count - 1), mutDoc: encoder.mutDoc)
-        nestedEncoder.setEncodedValue(nestedObject)
-        
-        let container = JSONKeyedEncodingContainer<NestedKey>(encoder: nestedEncoder, codingPathNode: codingPathNode.appending(index: count - 1))
+        let nestedObject = array.appendObject()
+        let container = JSONKeyedEncodingContainer<NestedKey>(
+            encoder: encoder,
+            codingPathNode: codingPathNode.appending(index: count - 1),
+            object: nestedObject
+        )
         return KeyedEncodingContainer(container)
     }
     
     mutating func nestedUnkeyedContainer() -> UnkeyedEncodingContainer {
-        let nestedArray = yyjson_mut_arr(encoder.mutDoc)
-        appendValue(nestedArray)
-        
-        let nestedEncoder = JSONEncoderImpl(options: encoder.options, ownerEncoder: encoder, codingKey: _CodingKey(index: count - 1), mutDoc: encoder.mutDoc)
-        nestedEncoder.setEncodedValue(nestedArray)
-        
-        return JSONUnkeyedEncodingContainer(encoder: nestedEncoder, codingPathNode: codingPathNode.appending(index: count - 1), array: nestedArray!)
+        let nestedArray = array.appendArray()
+        return JSONUnkeyedEncodingContainer(
+            encoder: encoder,
+            codingPathNode: codingPathNode.appending(index: count - 1),
+            array: nestedArray
+        )
     }
     
     mutating func superEncoder() -> Encoder {
-        let superObject = yyjson_mut_obj(encoder.mutDoc)
-        appendValue(superObject)
+        return JSONReferencingEncoder(
+            encoder: encoder,
+            index: count,
+            array: array
+        )
+    }
+}
+
+// MARK: - JSONReferencingEncoder
+
+/// A special encoder for encoding super values that writes back to the parent container on deinit
+private class JSONReferencingEncoder: Encoder {
+    
+    enum Reference {
+        case array(JSONFutureArray, Int)
+        case object(JSONFutureObject, String)
+    }
+    
+    let encoder: JSONEncoderImpl
+    let reference: Reference
+    
+    var codingPath: [CodingKey] {
+        encoder.codingPath + [codingKey]
+    }
+    
+    var userInfo: [CodingUserInfoKey: Any] {
+        encoder.userInfo
+    }
+    
+    let codingKey: CodingKey
+    
+    fileprivate var singleValue: UnsafeMutablePointer<yyjson_mut_val>?
+    fileprivate var array: JSONFutureArray?
+    fileprivate var object: JSONFutureObject?
+    
+    init(encoder: JSONEncoderImpl, key: some CodingKey, convertedKey: String, object: JSONFutureObject) {
+        self.encoder = encoder
+        self.codingKey = key
+        self.reference = .object(object, convertedKey)
+    }
+    
+    init(encoder: JSONEncoderImpl, index: Int, array: JSONFutureArray) {
+        self.encoder = encoder
+        self.codingKey = _CodingKey(index: index)
+        self.reference = .array(array, index)
+    }
+    
+    deinit {
+        let value: JSONFuture
+        if let obj = self.object {
+            value = .nestedObject(obj)
+        } else if let arr = self.array {
+            value = .nestedArray(arr)
+        } else {
+            value = .value(self.singleValue ?? yyjson_mut_obj(encoder.mutDoc))
+        }
         
-        let superEncoder = JSONEncoderImpl(options: encoder.options, ownerEncoder: encoder, codingKey: _CodingKey(index: count - 1), mutDoc: encoder.mutDoc)
-        superEncoder.setEncodedValue(superObject)
+        switch reference {
+        case .array(let arr, let index):
+            arr.array.insert(value, at: index)
+        case .object(let obj, let key):
+            obj.dict[key] = value
+        }
+    }
+    
+    func container<Key: CodingKey>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> {
+        if let existingObject = self.object {
+            let container = JSONKeyedEncodingContainer<Key>(
+                encoder: encoder,
+                codingPathNode: encoder.codingPathNode.appending(codingKey),
+                object: existingObject
+            )
+            return KeyedEncodingContainer(container)
+        }
         
-        return superEncoder
+        precondition(
+            self.singleValue == nil && self.array == nil,
+            "Attempt to push new keyed encoding container when already previously encoded at this path."
+        )
+        
+        let newObject = JSONFutureObject()
+        self.object = newObject
+        let container = JSONKeyedEncodingContainer<Key>(
+            encoder: encoder,
+            codingPathNode: encoder.codingPathNode.appending(codingKey),
+            object: newObject
+        )
+        return KeyedEncodingContainer(container)
+    }
+    
+    func unkeyedContainer() -> UnkeyedEncodingContainer {
+        if let existingArray = self.array {
+            return JSONUnkeyedEncodingContainer(
+                encoder: encoder,
+                codingPathNode: encoder.codingPathNode.appending(codingKey),
+                array: existingArray
+            )
+        }
+        
+        precondition(
+            self.singleValue == nil && self.object == nil,
+            "Attempt to push new unkeyed encoding container when already previously encoded at this path."
+        )
+        
+        let newArray = JSONFutureArray()
+        self.array = newArray
+        return JSONUnkeyedEncodingContainer(
+            encoder: encoder,
+            codingPathNode: encoder.codingPathNode.appending(codingKey),
+            array: newArray
+        )
+    }
+    
+    func singleValueContainer() -> SingleValueEncodingContainer {
+        return JSONReferencingSingleValueContainer(referencingEncoder: self)
+    }
+}
+
+// MARK: - JSONReferencingSingleValueContainer
+
+private struct JSONReferencingSingleValueContainer: SingleValueEncodingContainer {
+    let referencingEncoder: JSONReferencingEncoder
+    
+    var codingPath: [CodingKey] {
+        referencingEncoder.codingPath
+    }
+    
+    private var encoder: JSONEncoderImpl {
+        referencingEncoder.encoder
+    }
+    
+    private var mutDoc: UnsafeMutablePointer<yyjson_mut_doc> {
+        encoder.mutDoc
+    }
+    
+    func encodeNil() throws {
+        referencingEncoder.singleValue = yyjson_mut_null(mutDoc)
+    }
+    
+    func encode(_ value: Bool) throws {
+        referencingEncoder.singleValue = yyjson_mut_bool(mutDoc, value)
+    }
+    
+    func encode(_ value: String) throws {
+        referencingEncoder.singleValue = encoder.boxString(value)
+    }
+    
+    func encode(_ value: Double) throws {
+        referencingEncoder.singleValue = try encoder.boxFloat(value)
+    }
+    
+    func encode(_ value: Float) throws {
+        referencingEncoder.singleValue = try encoder.boxFloat(value)
+    }
+    
+    func encode(_ value: Int) throws {
+        referencingEncoder.singleValue = yyjson_mut_sint(mutDoc, Int64(value))
+    }
+    
+    func encode(_ value: Int8) throws {
+        referencingEncoder.singleValue = yyjson_mut_sint(mutDoc, Int64(value))
+    }
+    
+    func encode(_ value: Int16) throws {
+        referencingEncoder.singleValue = yyjson_mut_sint(mutDoc, Int64(value))
+    }
+    
+    func encode(_ value: Int32) throws {
+        referencingEncoder.singleValue = yyjson_mut_sint(mutDoc, Int64(value))
+    }
+    
+    func encode(_ value: Int64) throws {
+        referencingEncoder.singleValue = yyjson_mut_sint(mutDoc, value)
+    }
+    
+    func encode(_ value: UInt) throws {
+        referencingEncoder.singleValue = yyjson_mut_uint(mutDoc, UInt64(value))
+    }
+    
+    func encode(_ value: UInt8) throws {
+        referencingEncoder.singleValue = yyjson_mut_uint(mutDoc, UInt64(value))
+    }
+    
+    func encode(_ value: UInt16) throws {
+        referencingEncoder.singleValue = yyjson_mut_uint(mutDoc, UInt64(value))
+    }
+    
+    func encode(_ value: UInt32) throws {
+        referencingEncoder.singleValue = yyjson_mut_uint(mutDoc, UInt64(value))
+    }
+    
+    func encode(_ value: UInt64) throws {
+        referencingEncoder.singleValue = yyjson_mut_uint(mutDoc, value)
+    }
+    
+    #if compiler(>=6.0)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func encode(_ value: Int128) throws {
+        referencingEncoder.singleValue = encoder.boxString(String(value))
+    }
+    
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func encode(_ value: UInt128) throws {
+        referencingEncoder.singleValue = encoder.boxString(String(value))
+    }
+    #endif
+    
+    func encode<T: Encodable>(_ value: T) throws {
+        referencingEncoder.singleValue = try encoder.box(value, for: referencingEncoder.codingKey)
     }
 }

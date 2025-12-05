@@ -205,20 +205,35 @@ open class ReerJSONEncoder {
         defer {
             yyjson_mut_doc_free(doc)
         }
-        let encoder = JSONEncoderImpl(options: options, ownerEncoder: nil, mutDoc: doc)
+        let encoder = JSONEncoderImpl(options: options, mutDoc: doc)
         
         let topLevelValue = try encoder.box(value)
+        
+        // Check if the type encoded nothing (topLevelValue is nil or encoder didn't produce a value)
+        guard let topLevelValue = topLevelValue else {
+            throw EncodingError.invalidValue(value, EncodingError.Context(
+                codingPath: [],
+                debugDescription: "Top-level \(type(of: value)) did not encode any values."
+            ))
+        }
         
         yyjson_mut_doc_set_root(doc, topLevelValue)
         
         var writeFlags: yyjson_write_flag = 0
         if options.outputFormatting.contains(.prettyPrinted) {
-            writeFlags |= YYJSON_WRITE_PRETTY
+            writeFlags |= YYJSON_WRITE_PRETTY_TWO_SPACES
         }
-//        if options.outputFormatting.contains(.sortedKeys) {
-//            writeFlags |= YYJSON_WRITE_SORTED_KEYS
-//        }
-        
+        // By default, escape slashes (Apple's JSONEncoder behavior)
+        var shouldEscapeSlashes = true
+        if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
+            shouldEscapeSlashes = !options.outputFormatting.contains(.withoutEscapingSlashes)
+        }
+        if shouldEscapeSlashes {
+            writeFlags |= YYJSON_WRITE_ESCAPE_SLASHES
+        }
+        //        if options.outputFormatting.contains(.sortedKeys) {
+        //            writeFlags |= YYJSON_WRITE_SORTED_KEYS
+        //        }
         var length: Int = 0
         guard let jsonCString = yyjson_mut_write(doc, writeFlags, &length) else {
             throw EncodingError.invalidValue(value, EncodingError.Context(

@@ -245,7 +245,105 @@ open class ReerJSONEncoder {
             free(jsonCString)
         }
         
-        return Data(bytes: jsonCString, count: length)
+        var data = Data(bytes: jsonCString, count: length)
+        
+        // Post-process for Apple's pretty print format
+        // Apple uses "key" : "value" (space before colon), yyjson uses "key": "value"
+        if options.outputFormatting.contains(.prettyPrinted) {
+            data = postProcessPrettyPrint(data)
+        }
+        
+        // Post-process Unicode escapes to use lowercase hex (Apple's format)
+        // yyjson uses uppercase: \u001F, Apple uses lowercase: \u001f
+        data = postProcessUnicodeEscapes(data)
+        
+        return data
+    }
+    
+    /// Post-process Unicode escapes to use lowercase hex (Apple's format)
+    /// Converts \uXXXX with uppercase hex to lowercase
+    private func postProcessUnicodeEscapes(_ data: Data) -> Data {
+        var result = Data()
+        result.reserveCapacity(data.count)
+        
+        var i = 0
+        let bytes = Array(data)
+        let count = bytes.count
+        
+        while i < count {
+            let byte = bytes[i]
+            
+            // Look for \u pattern
+            if byte == UInt8(ascii: "\\") && i + 1 < count && bytes[i + 1] == UInt8(ascii: "u") {
+                // Found \u, copy it and convert next 4 hex chars to lowercase
+                result.append(byte) // \
+                result.append(bytes[i + 1]) // u
+                i += 2
+                
+                // Convert next 4 characters to lowercase if they're uppercase hex
+                for _ in 0..<4 {
+                    if i < count {
+                        var hexByte = bytes[i]
+                        // Convert A-F to a-f
+                        if hexByte >= UInt8(ascii: "A") && hexByte <= UInt8(ascii: "F") {
+                            hexByte = hexByte + 32 // Convert to lowercase
+                        }
+                        result.append(hexByte)
+                        i += 1
+                    }
+                }
+            } else {
+                result.append(byte)
+                i += 1
+            }
+        }
+        
+        return result
+    }
+    
+    /// Post-process JSON data to match Apple's pretty print format
+    /// Converts "key": "value" to "key" : "value" (adds space before colon)
+    /// Only applies outside of string values
+    private func postProcessPrettyPrint(_ data: Data) -> Data {
+        var result = Data()
+        result.reserveCapacity(data.count + data.count / 20) // Rough estimate for added spaces
+        
+        var inString = false
+        var escaped = false
+        var prevWasQuote = false
+        
+        for byte in data {
+            if escaped {
+                result.append(byte)
+                escaped = false
+                prevWasQuote = false
+                continue
+            }
+            
+            if byte == UInt8(ascii: "\\") {
+                escaped = true
+                result.append(byte)
+                prevWasQuote = false
+                continue
+            }
+            
+            if byte == UInt8(ascii: "\"") {
+                inString = !inString
+                result.append(byte)
+                prevWasQuote = !inString // Track if we just closed a string
+                continue
+            }
+            
+            // If we just closed a string and see a colon, add a space before the colon
+            if !inString && prevWasQuote && byte == UInt8(ascii: ":") {
+                result.append(UInt8(ascii: " "))
+            }
+            
+            result.append(byte)
+            prevWasQuote = false
+        }
+        
+        return result
     }
     
     func encodeWithFoundationEncoder<T : Encodable>(_ value: T) throws -> Data {

@@ -161,13 +161,14 @@ final class JSONEncoderImpl: Encoder {
     // MARK: - Encoder Reuse
     
     @inline(__always)
-    func getEncoder(for additionalKey: (some CodingKey)?) -> JSONEncoderImpl {
+    func getEncoder(for additionalKey: (some CodingKey)?, basePathNode: CodingPathNode? = nil) -> JSONEncoderImpl {
+        let basePath = basePathNode ?? self.codingPathNode
         if let additionalKey {
             if let takenEncoder = sharedSubEncoder {
                 self.sharedSubEncoder = nil
                 takenEncoder.codingKey = additionalKey
                 takenEncoder.ownerEncoder = self
-                takenEncoder.codingPathNode = self.codingPathNode.appending(additionalKey)
+                takenEncoder.codingPathNode = basePath.appending(additionalKey)
                 takenEncoder.singleValue = nil
                 takenEncoder.array = nil
                 takenEncoder.object = nil
@@ -176,7 +177,7 @@ final class JSONEncoderImpl: Encoder {
             let encoder = JSONEncoderImpl(
                 options: self.options,
                 mutDoc: self.mutDoc,
-                codingPathNode: self.codingPathNode.appending(additionalKey)
+                codingPathNode: basePath.appending(additionalKey)
             )
             encoder.ownerEncoder = self
             encoder.codingKey = additionalKey
@@ -339,13 +340,13 @@ extension JSONEncoderImpl: SingleValueEncodingContainer {
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func encode(_ value: Int128) throws {
         assertCanEncodeNewValue()
-        singleValue = boxString(String(value))
+        singleValue = boxInt128(value)
     }
     
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func encode(_ value: UInt128) throws {
         assertCanEncodeNewValue()
-        singleValue = boxString(String(value))
+        singleValue = boxUInt128(value)
     }
     #endif
     
@@ -412,6 +413,11 @@ extension JSONEncoderImpl {
             return boxDecimal(decimal)
         }
         
+        // Handle String-keyed dictionaries - DO NOT apply key conversion to dictionary keys
+        if value is StringEncodableDictionary {
+            return try boxStringKeyedDictionary(value, for: additionalKey)
+        }
+        
         // Try optimized array encoding for primitive types
         if let array = value as? EncodableArray {
             if let optimized = try boxOptimizedArray(array, for: additionalKey) {
@@ -427,12 +433,58 @@ extension JSONEncoderImpl {
         if let result = encoder.takeValue() {
             return result
         }
-        // For non-top-level encoding, return empty object
-        // Top-level will get nil and handle it appropriately
-        if additionalKey != nil {
+        // For non-top-level encoding (not at root), return empty object
+        // Top-level (root) will get nil and handle it appropriately
+        // Check if the encoder's path is not empty (i.e., we're nested)
+        if !encoder.codingPath.isEmpty {
             return yyjson_mut_obj(mutDoc)
         }
         return nil
+    }
+    
+    /// Box a String-keyed dictionary without applying key conversion
+    /// Dictionary keys should NOT be transformed by keyEncodingStrategy
+    func boxStringKeyedDictionary<T: Encodable>(_ value: T, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+        let obj = yyjson_mut_obj(mutDoc)
+        
+        // Use Mirror to iterate over dictionary entries
+        let mirror = Mirror(reflecting: value)
+        guard mirror.displayStyle == .dictionary else {
+            return nil
+        }
+        
+        // Collect keys for potential sorting
+        var entries: [(key: String, value: Any)] = []
+        for child in mirror.children {
+            guard let pair = child.value as? (key: Any, value: Any),
+                  let key = pair.key as? String else {
+                continue
+            }
+            entries.append((key: key, value: pair.value))
+        }
+        
+        // Sort keys if needed - use simple string comparison (< operator)
+        // This matches Apple's JSONEncoder behavior
+        if options.outputFormatting.contains(.sortedKeys) {
+            entries.sort { $0.key < $1.key }
+        }
+        
+        // Encode entries - use original key WITHOUT conversion
+        for entry in entries {
+            let keyVal = boxString(entry.key)
+            
+            if let encodableValue = entry.value as? Encodable {
+                let key = _CodingKey(stringValue: entry.key)!
+                // Create sub-encoder with key already in path
+                var subEncoder = getEncoder(for: key)
+                defer { returnEncoder(&subEncoder) }
+                // Don't pass key again - it's already in subEncoder's path
+                let encodedValue = try subEncoder.box(encodableValue)
+                yyjson_mut_obj_add(obj, keyVal, encodedValue)
+            }
+        }
+        
+        return obj
     }
     
     func boxDate(_ date: Date, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
@@ -508,28 +560,25 @@ extension JSONEncoderImpl {
         }
     }
     
-    func boxDictionary(_ dict: [String: Encodable], for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
-        let obj = yyjson_mut_obj(mutDoc)
-        
-        // Sort keys if needed
-        var keys = Array(dict.keys)
-        if options.outputFormatting.contains(.sortedKeys) {
-            keys.sort(by: JSONFutureObject.sortedKeyComparator)
+    #if compiler(>=6.0)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func boxInt128(_ value: Int128) -> UnsafeMutablePointer<yyjson_mut_val>? {
+        // Output Int128 as raw number to preserve the full value
+        let description = String(value)
+        return description.withCString { cStr in
+            yyjson_mut_rawcpy(mutDoc, cStr)
         }
-        
-        for key in keys {
-            guard let value = dict[key] else { continue }
-            // Do NOT apply key conversion to dictionary string keys
-            // Key conversion only applies to CodingKeys from types
-            let keyVal = boxString(key)
-            
-            var encoder = getEncoder(for: _CodingKey(stringValue: key))
-            defer { returnEncoder(&encoder) }
-            let encodedValue = try encoder.box(value, for: _CodingKey(stringValue: key))
-            yyjson_mut_obj_add(obj, keyVal, encodedValue)
-        }
-        return obj
     }
+    
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    func boxUInt128(_ value: UInt128) -> UnsafeMutablePointer<yyjson_mut_val>? {
+        // Output UInt128 as raw number to preserve the full value
+        let description = String(value)
+        return description.withCString { cStr in
+            yyjson_mut_rawcpy(mutDoc, cStr)
+        }
+    }
+    #endif
     
     func boxOptimizedArray(_ array: EncodableArray, for additionalKey: (some CodingKey)? = _CodingKey?.none) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
         let arr = yyjson_mut_arr(mutDoc)
@@ -593,11 +642,11 @@ extension JSONEncoderImpl {
         
         #if compiler(>=6.0)
         if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *), let a = array as? [Int128] {
-            for v in a { yyjson_mut_arr_append(arr, boxString(String(v))) }
+            for v in a { yyjson_mut_arr_append(arr, boxInt128(v)) }
             return arr
         }
         if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *), let a = array as? [UInt128] {
-            for v in a { yyjson_mut_arr_append(arr, boxString(String(v))) }
+            for v in a { yyjson_mut_arr_append(arr, boxUInt128(v)) }
             return arr
         }
         #endif
@@ -692,9 +741,10 @@ final class JSONFutureObject {
         return obj
     }
     
-    /// Comparator for sorted keys - follows localized, numeric comparison rules
+    /// Comparator for sorted keys - simple string comparison (< operator)
+    /// This matches Apple's JSONEncoder behavior
     static let sortedKeyComparator: (String, String) -> Bool = { lhs, rhs in
-        lhs.compare(rhs, options: [.numeric], locale: .current) == .orderedAscending
+        lhs < rhs
     }
 }
 
@@ -803,7 +853,18 @@ private struct JSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContainerP
     
     @inline(__always)
     private func converted(_ key: some CodingKey) -> String {
-        encoder.convertedKey(key)
+        // Use container's codingPath, not encoder's codingPath
+        switch encoder.options.keyEncodingStrategy {
+        case .useDefaultKeys:
+            return key.stringValue
+        case .convertToSnakeCase:
+            return JSONEncoderImpl._convertToSnakeCase(key.stringValue)
+        case .custom(let converter):
+            // Append the key to the container's path (which is the full path up to this container)
+            return converter(codingPath + [key]).stringValue
+        @unknown default:
+            return key.stringValue
+        }
     }
     
     mutating func encodeNil(forKey key: K) throws {
@@ -869,19 +930,23 @@ private struct JSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContainerP
     #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func encode(_ value: Int128, forKey key: K) throws {
-        object.set(encoder.boxString(String(value)), for: converted(key))
+        // Encode as raw number (not string) to match Apple's JSONEncoder behavior
+        object.set(encoder.boxInt128(value), for: converted(key))
     }
     
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func encode(_ value: UInt128, forKey key: K) throws {
-        object.set(encoder.boxString(String(value)), for: converted(key))
+        // Encode as raw number (not string) to match Apple's JSONEncoder behavior
+        object.set(encoder.boxUInt128(value), for: converted(key))
     }
     #endif
     
     mutating func encode<T: Encodable>(_ value: T, forKey key: K) throws {
-        var subEncoder = encoder.getEncoder(for: key)
+        // Create sub-encoder with path based on container's codingPath, not encoder's
+        // The key is already added to subEncoder's codingPathNode, so don't pass it to box() again
+        var subEncoder = encoder.getEncoder(for: key, basePathNode: codingPathNode)
         defer { encoder.returnEncoder(&subEncoder) }
-        let encoded = try subEncoder.box(value, for: key)
+        let encoded = try subEncoder.box(value)
         object.set(encoded, for: converted(key))
     }
     
@@ -1040,20 +1105,22 @@ private struct JSONUnkeyedEncodingContainer: UnkeyedEncodingContainer {
     #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func encode(_ value: Int128) throws {
-        array.append(encoder.boxString(String(value)))
+        array.append(encoder.boxInt128(value))
     }
     
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     mutating func encode(_ value: UInt128) throws {
-        array.append(encoder.boxString(String(value)))
+        array.append(encoder.boxUInt128(value))
     }
     #endif
     
     mutating func encode<T: Encodable>(_ value: T) throws {
         let key = _CodingKey(index: count)
-        var subEncoder = encoder.getEncoder(for: key)
+        // Pass basePathNode to use container's path
+        var subEncoder = encoder.getEncoder(for: key, basePathNode: codingPathNode)
         defer { encoder.returnEncoder(&subEncoder) }
-        let encoded = try subEncoder.box(value, for: key)
+        // Don't pass key again - it's already in subEncoder's path
+        let encoded = try subEncoder.box(value)
         array.append(encoded)
     }
     
@@ -1275,12 +1342,12 @@ private struct JSONReferencingSingleValueContainer: SingleValueEncodingContainer
     #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func encode(_ value: Int128) throws {
-        referencingEncoder.singleValue = encoder.boxString(String(value))
+        referencingEncoder.singleValue = encoder.boxInt128(value)
     }
     
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
     func encode(_ value: UInt128) throws {
-        referencingEncoder.singleValue = encoder.boxString(String(value))
+        referencingEncoder.singleValue = encoder.boxUInt128(value)
     }
     #endif
     

@@ -47,9 +47,26 @@ Depend on `ReerJSON` in your target.
 ```
 
 # Usage
-Just replace `JSONDecoder` with `ReerJSONDecoder` wherever you want to use it. So instead of `let decoder = JSONDecoder()`, do `let decoder = ReerJSONDecoder()`, and everything will just work. This is because `ReerJSONDecoder` has the exact same API as `JSONDecoder`. Also, don't forget to add `import ReerJSON` in files where you use it.
+`ReerJSONDecoder` is API-compatible replacements for Foundation's JSONDecoder. 
+Simply swap the type and add the import, no other code changes required:
+
+```
+import ReerJSON
+
+// Before
+let decoder = JSONDecoder()
+
+// After
+let decoder = ReerJSONDecoder()
+```
+
+All public interfaces, behaviors, error types, and coding strategies are identical to the Foundation counterparts. The ReerJSON test suite includes exhaustive test cases covering every feature, ensuring full compatibility.
+
 
 # Differences
+
+Except for the items listed below, ReerJSON behaves exactly the same as Foundation—every capability, every thrown error, and every edge case is covered by a comprehensive test suite.
+
 | Decoder Diff              | Foundation |ReerJSON                   |
 |---------------------------|------------|---------------------------|
 | JSON5                     | ✅         | ✅                        |                       

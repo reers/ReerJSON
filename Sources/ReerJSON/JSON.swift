@@ -67,7 +67,11 @@ extension JSON {
         if memchr(cString, 0, length) != nil {
             return nil
         }
-        return String(cString: cString)
+        let buffer = UnsafeBufferPointer(
+            start: UnsafeRawPointer(cString).assumingMemoryBound(to: UInt8.self),
+            count: length
+        )
+        return String(decoding: buffer, as: UTF8.self)
     }
     
     @inline(__always)
@@ -78,7 +82,11 @@ extension JSON {
             let rawBuffer = UnsafeRawBufferPointer(start: cString, count: length)
             return String(bytes: rawBuffer, encoding: .utf8)
         }
-        return String(cString: cString)
+        let buffer = UnsafeBufferPointer(
+            start: UnsafeRawPointer(cString).assumingMemoryBound(to: UInt8.self),
+            count: length
+        )
+        return String(decoding: buffer, as: UTF8.self)
     }
     
     @inline(__always)

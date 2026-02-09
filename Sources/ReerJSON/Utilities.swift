@@ -10,9 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if os(Linux)
 import Foundation
-#else
+#if !os(Linux)
 import JJLISO8601DateFormatter
 #endif
 

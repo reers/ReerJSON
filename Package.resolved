@@ -1,13 +1,13 @@
 {
-  "originHash" : "fb0697fbc4412c87ed2cfc6f45cc95cff81c22ada5d6600fc74c6faf707f78cb",
+  "originHash" : "964ba52f829bb58fb4b43448757fcca80c913ab20421daf38960b43ef5193aec",
   "pins" : [
     {
       "identity" : "jjliso8601dateformatter",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/michaeleisel/JJLISO8601DateFormatter.git",
       "state" : {
-        "revision" : "741a9e45db01148a8ac60c5e12f7c978181a22d3",
-        "version" : "0.1.8"
+        "revision" : "50d5ea26ffd3f82e3db8516d939d80b745e168cf",
+        "version" : "0.2.0"
       }
     },
     {

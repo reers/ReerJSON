@@ -28,7 +28,7 @@ ReerJSON is a really fast JSON parser, and it's inspired by [ZippyJSON](https://
 ![CleanShot 2025-09-18 at 13 40 05@2x](https://github.com/user-attachments/assets/3f814fa3-72b0-4005-bea5-7391105aa6dd)
 
 
-Tested with ReerJSON 0.3.0, ZippyJSON 1.2.15, IkigaJSON 2.3.2
+Tested with ReerJSON 0.3.2, ZippyJSON 1.2.15, IkigaJSON 2.3.2
 
 [Code for Benchmarks](https://github.com/Asura19/ReerJSONBenchmark)
 
@@ -38,7 +38,7 @@ Tested with ReerJSON 0.3.0, ZippyJSON 1.2.15, IkigaJSON 2.3.2
 
 Add dependency in `Package.swift` or project `Package Dependencies`
 ```swift
-.package(url: "https://github.com/reers/ReerJSON.git", from: "0.3.0"),
+.package(url: "https://github.com/reers/ReerJSON.git", from: "0.3.2"),
 ```
 
 Depend on `ReerJSON` in your target.

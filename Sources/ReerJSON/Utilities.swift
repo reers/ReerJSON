@@ -10,11 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if os(Linux)
 import Foundation
-#else
+//#if !os(Linux)
 import JJLISO8601DateFormatter
-#endif
+//#endif
 
 enum CodingPathNode: Sendable {
     case root
@@ -147,16 +146,16 @@ extension Optional {
     }
 }
 
-#if os(Linux)
-nonisolated(unsafe) let _iso8601Formatter: ISO8601DateFormatter = {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = .withInternetDateTime
-    return formatter
-}()
-#else
+//#if os(Linux)
+//nonisolated(unsafe) let _iso8601Formatter: ISO8601DateFormatter = {
+//    let formatter = ISO8601DateFormatter()
+//    formatter.formatOptions = .withInternetDateTime
+//    return formatter
+//}()
+//#else
 nonisolated(unsafe) let _iso8601Formatter: JJLISO8601DateFormatter = {
     let formatter = JJLISO8601DateFormatter()
     formatter.formatOptions = .withInternetDateTime
     return formatter
 }()
-#endif
+//#endif

@@ -1,5 +1,5 @@
 # ReerJSON
-## A faster version of JSONDecoder based on [yyjson](https://github.com/ibireme/yyjson)
+## A faster version of JSONDecoder & JSONEncoder based on [yyjson](https://github.com/ibireme/yyjson)
 
 ![Coverage: 88%](https://img.shields.io/static/v1?label=coverage&message=88%&color=brightgreen)
 [![SwiftPM compatible](https://img.shields.io/badge/SwiftPM-compatible%20%28iOS%29-brightgreen)](https://swift.org/package-manager/)
@@ -47,7 +47,7 @@ Depend on `ReerJSON` in your target.
 ```
 
 # Usage
-`ReerJSONDecoder` is API-compatible replacements for Foundation's JSONDecoder. 
+`ReerJSONDecoder` and `ReerJSONEncoder` are API-compatible replacements for Foundation's JSONDecoder and JSONEncoder. 
 Simply swap the type and add the import, no other code changes required:
 
 ```
@@ -55,9 +55,11 @@ import ReerJSON
 
 // Before
 let decoder = JSONDecoder()
+let encoder = JSONEncoder()
 
 // After
 let decoder = ReerJSONDecoder()
+let encoder = ReerJSONEncoder()
 ```
 
 All public interfaces, behaviors, error types, and coding strategies are identical to the Foundation counterparts. The ReerJSON test suite includes exhaustive test cases covering every feature, ensuring full compatibility.
@@ -67,17 +69,26 @@ All public interfaces, behaviors, error types, and coding strategies are identic
 
 Except for the items listed below, ReerJSON behaves exactly the same as Foundation—every capability, every thrown error, and every edge case is covered by a comprehensive test suite.
 
+## Decoder
+
 | Decoder Diff              | Foundation |ReerJSON                   |
 |---------------------------|------------|---------------------------|
 | JSON5                     | ✅         | ✅                        |                       
 | assumesTopLevelDictionary | ✅         | ❌                        |
 | Infinity and NaN          | ±Infinity, ±NaN | ±Infinity, ±NaN, ±Inf and case-insensitive. See [details](https://github.com/reers/ReerJSON/blob/main/Tests/ReerJSONTests/JSONEncoderTests.swift#L1975) |
 
+## Encoder
+
+| Encoder Diff          | Foundation              | ReerJSON                              |
+|-----------------------|-------------------------|---------------------------------------|
+| Unicode escape casing | `\u001f` (lowercase)    | `\u001F` (uppercase). Both are valid JSON per RFC 8259 |
+| Pretty-print colon    | `"key" : value` (space before and after colon) | `"key": value` (space after colon only) |
+
 # TODO
 * [x] Add GitHub workflow for CI.
 * [x] Support `CodableWithConfiguration`.
 * [x] Support JSON5 decoding.
-* [ ] Implement ReerJSONEncoder.
+* [x] Implement ReerJSONEncoder.
 
 # License
 This project is licensed under the MIT License.

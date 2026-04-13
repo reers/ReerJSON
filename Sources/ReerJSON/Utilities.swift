@@ -142,6 +142,14 @@ extension JSONDecoder.KeyDecodingStrategy {
     }
 }
 
+extension JSONEncoder.NonConformingFloatEncodingStrategy {
+    @inline(__always)
+    var isThrow: Bool {
+        if case .throw = self { return true }
+        return false
+    }
+}
+
 // This is a workaround for the lack of a "set value only if absent" function for Dictionary.
 extension Optional {
     mutating func _setIfNil(to value: Wrapped) {

@@ -143,6 +143,7 @@ class JSONEncoderImpl: Encoder {
     // MARK: - Generic Encodable wrapping (T.self == for fast dispatch)
 
     func wrapGenericEncodable<T: Encodable>(_ value: T, for additionalKey: CodingKey?) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
+        // Fast-path: special Foundation types (most commonly encountered)
         if T.self == Date.self { return try wrapDateValue(value as! Date, for: additionalKey) }
         if T.self == Data.self { return try wrapDataValue(value as! Data, for: additionalKey) }
         if T.self == URL.self { return wrapString((value as! URL).absoluteString) }
@@ -154,6 +155,10 @@ class JSONEncoderImpl: Encoder {
             if T.self == UInt128.self { return wrapUInt128(value as! UInt128) }
         }
         #endif
+
+        if T.self is _JSONStringDictionaryEncodableMarker.Type, let dict = value as? [String: Encodable] {
+            return try wrapStringKeyedDictValue(dict, for: additionalKey)
+        }
 
         if T.self == [Double].self { return wrapBulkDoubleArray(value as! [Double]) }
         if T.self == [[Double]].self { return wrapNestedDoubleArray(value as! [[Double]]) }
@@ -172,14 +177,7 @@ class JSONEncoderImpl: Encoder {
         if T.self == [UInt64].self { return wrapBulkUInt64Array(value as! [UInt64]) }
         if T.self == [Float].self { return try wrapFloatArray(value as! [Float]) }
 
-        if T.self is _JSONStringDictionaryEncodableMarker.Type, let dict = value as? [String: Encodable] {
-            return try wrapStringKeyedDictValue(dict, for: additionalKey)
-        }
-
-        let newPath = codingPath + (additionalKey.map { [$0] } ?? [])
-        let sub = JSONEncoderImpl(doc: doc, codingPath: newPath, options: options)
-        try value.encode(to: sub)
-        return sub.takeValue()
+        return try _encodeNestedValue(for: additionalKey) { try value.encode(to: self) }
     }
 
     func wrapEncodable(_ value: Encodable, for additionalKey: CodingKey?) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
@@ -197,15 +195,26 @@ class JSONEncoderImpl: Encoder {
         }
         #endif
 
-        let newPath = codingPath + (additionalKey.map { [$0] } ?? [])
-        let sub = JSONEncoderImpl(doc: doc, codingPath: newPath, options: options)
-        try value.encode(to: sub)
-        return sub.takeValue()
+        return try _encodeNestedValue(for: additionalKey) { try value.encode(to: self) }
+    }
+
+    /// Reuse this encoder for a nested value.encode(to:) call, avoiding array copy + object allocation.
+    @inline(__always)
+    private func _encodeNestedValue(for additionalKey: CodingKey?, body: () throws -> Void) rethrows -> UnsafeMutablePointer<yyjson_mut_val>? {
+        if let key = additionalKey { codingPath.append(key) }
+        let savedSV = singleValue; let savedArr = array; let savedObj = object
+        singleValue = nil; array = nil; object = nil
+        defer {
+            singleValue = savedSV; array = savedArr; object = savedObj
+            if additionalKey != nil { codingPath.removeLast() }
+        }
+        try body()
+        return takeValue()
     }
 
     // MARK: - Bulk array fast paths (single C call, zero Swift loop)
 
-    @inline(__always) private func wrapBulkDoubleArray(_ arr: [Double]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkDoubleArray(_ arr: [Double]) -> UnsafeMutablePointer<yyjson_mut_val> {
         if options.nonConformingFloatEncodingStrategy.isThrow {
             return arr.withUnsafeBufferPointer { yyjson_mut_arr_with_double(doc, $0.baseAddress, $0.count) }
         }
@@ -219,47 +228,47 @@ class JSONEncoderImpl: Encoder {
         }
         return result
     }
-    @inline(__always) private func wrapBulkBoolArray(_ arr: [Bool]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkBoolArray(_ arr: [Bool]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_bool(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkInt8Array(_ arr: [Int8]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkInt8Array(_ arr: [Int8]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_sint8(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkInt16Array(_ arr: [Int16]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkInt16Array(_ arr: [Int16]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_sint16(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkInt32Array(_ arr: [Int32]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkInt32Array(_ arr: [Int32]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_sint32(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkInt64Array(_ arr: [Int64]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkInt64Array(_ arr: [Int64]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_sint64(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkIntArray(_ arr: [Int]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkIntArray(_ arr: [Int]) -> UnsafeMutablePointer<yyjson_mut_val> {
         let mapped = arr.map { Int64($0) }
         return mapped.withUnsafeBufferPointer { yyjson_mut_arr_with_sint64(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkUInt8Array(_ arr: [UInt8]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkUInt8Array(_ arr: [UInt8]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_uint8(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkUInt16Array(_ arr: [UInt16]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkUInt16Array(_ arr: [UInt16]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_uint16(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkUInt32Array(_ arr: [UInt32]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkUInt32Array(_ arr: [UInt32]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_uint32(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkUInt64Array(_ arr: [UInt64]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkUInt64Array(_ arr: [UInt64]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_uint64(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkUIntArray(_ arr: [UInt]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkUIntArray(_ arr: [UInt]) -> UnsafeMutablePointer<yyjson_mut_val> {
         let mapped = arr.map { UInt64($0) }
         return mapped.withUnsafeBufferPointer { yyjson_mut_arr_with_uint64(doc, $0.baseAddress, $0.count) }
     }
-    @inline(__always) private func wrapBulkStringArray(_ arr: [String]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapBulkStringArray(_ arr: [String]) -> UnsafeMutablePointer<yyjson_mut_val> {
         let result = yyjson_mut_arr(doc)!
         for s in arr { yyjson_mut_arr_append(result, wrapString(s)) }
         return result
     }
-    @inline(__always) private func wrapFloatArray(_ arr: [Float]) throws -> UnsafeMutablePointer<yyjson_mut_val> {
+    @inline(__always) func wrapFloatArray(_ arr: [Float]) throws -> UnsafeMutablePointer<yyjson_mut_val> {
         let result = yyjson_mut_arr(doc)!
         for f in arr { yyjson_mut_arr_append(result, try wrapFloat(f, for: nil)) }
         return result
@@ -267,13 +276,13 @@ class JSONEncoderImpl: Encoder {
 
     // MARK: - Nested double array fast paths (Canada-killer)
 
-    private func wrapNestedDoubleArray(_ arr: [[Double]]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    func wrapNestedDoubleArray(_ arr: [[Double]]) -> UnsafeMutablePointer<yyjson_mut_val> {
         let result = yyjson_mut_arr(doc)!
         for inner in arr { yyjson_mut_arr_append(result, wrapBulkDoubleArray(inner)) }
         return result
     }
 
-    private func wrapTripleNestedDoubleArray(_ arr: [[[Double]]]) -> UnsafeMutablePointer<yyjson_mut_val> {
+    func wrapTripleNestedDoubleArray(_ arr: [[[Double]]]) -> UnsafeMutablePointer<yyjson_mut_val> {
         let result = yyjson_mut_arr(doc)!
         for inner in arr { yyjson_mut_arr_append(result, wrapNestedDoubleArray(inner)) }
         return result
@@ -284,9 +293,7 @@ class JSONEncoderImpl: Encoder {
     func wrapDateValue(_ date: Date, for additionalKey: CodingKey?) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
         switch options.dateEncodingStrategy {
         case .deferredToDate:
-            let sub = JSONEncoderImpl(doc: doc, codingPath: codingPath + (additionalKey.map { [$0] } ?? []), options: options)
-            try date.encode(to: sub)
-            return sub.takeValue()
+            return try _encodeNestedValue(for: additionalKey) { try date.encode(to: self) }
         case .secondsSince1970:
             return try wrapFloat(date.timeIntervalSince1970, for: additionalKey)
         case .millisecondsSince1970:
@@ -296,9 +303,7 @@ class JSONEncoderImpl: Encoder {
         case .formatted(let formatter):
             return wrapString(formatter.string(from: date))
         case .custom(let closure):
-            let sub = JSONEncoderImpl(doc: doc, codingPath: codingPath + (additionalKey.map { [$0] } ?? []), options: options)
-            try closure(date, sub)
-            return sub.takeValue() ?? yyjson_mut_obj(doc)
+            return try _encodeNestedValue(for: additionalKey) { try closure(date, self) } ?? yyjson_mut_obj(doc)
         @unknown default: fatalError()
         }
     }
@@ -306,15 +311,11 @@ class JSONEncoderImpl: Encoder {
     func wrapDataValue(_ data: Data, for additionalKey: CodingKey?) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
         switch options.dataEncodingStrategy {
         case .deferredToData:
-            let sub = JSONEncoderImpl(doc: doc, codingPath: codingPath + (additionalKey.map { [$0] } ?? []), options: options)
-            try data.encode(to: sub)
-            return sub.takeValue()
+            return try _encodeNestedValue(for: additionalKey) { try data.encode(to: self) }
         case .base64:
             return wrapString(data.base64EncodedString())
         case .custom(let closure):
-            let sub = JSONEncoderImpl(doc: doc, codingPath: codingPath + (additionalKey.map { [$0] } ?? []), options: options)
-            try closure(data, sub)
-            return sub.takeValue() ?? yyjson_mut_obj(doc)
+            return try _encodeNestedValue(for: additionalKey) { try closure(data, self) } ?? yyjson_mut_obj(doc)
         @unknown default: fatalError()
         }
     }
@@ -325,11 +326,8 @@ class JSONEncoderImpl: Encoder {
         if let additionalKey { codingPath.append(additionalKey) }
         for (key, value) in dict {
             let keyVal = wrapString(key)
-            codingPath.append(_CodingKey(stringValue: key)!)
-            let sub = JSONEncoderImpl(doc: doc, codingPath: codingPath, options: options)
-            let val = try sub.wrapEncodable(value, for: nil) ?? yyjson_mut_obj(doc)!
+            let val = try wrapEncodable(value, for: _CodingKey(stringValue: key)!) ?? yyjson_mut_obj(doc)!
             yyjson_mut_obj_add(obj, keyVal, val)
-            codingPath.removeLast()
         }
         codingPath = savedPath
         return obj

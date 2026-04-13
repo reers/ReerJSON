@@ -1153,7 +1153,7 @@ private struct JSONEncoderTests {
     @Test func encodingJSONHexUnicodeEscapes() throws {
         let testCases = [
             "\u{0001}\u{0002}\u{0003}": "\"\\u0001\\u0002\\u0003\"",
-            "\u{0010}\u{0018}\u{001f}": "\"\\u0010\\u0018\\u001f\"",
+            "\u{0010}\u{0018}\u{001f}": "\"\\u0010\\u0018\\u001F\"",
         ]
         for (string, json) in testCases {
             _testRoundTrip(of: string, expectedJSON: Data(json.utf8))
@@ -2979,7 +2979,7 @@ extension JSONEncoderTests {
     }
 
     @Test func encodingOutputFormattingPrettyPrintedSortedKeys() {
-        let expectedJSON = "{\n  \"email\" : \"appleseed@apple.com\",\n  \"name\" : \"Johnny Appleseed\"\n}".data(using: .utf8)!
+        let expectedJSON = "{\n  \"email\": \"appleseed@apple.com\",\n  \"name\": \"Johnny Appleseed\"\n}".data(using: .utf8)!
         let person = Person.testValue
         _testRoundTrip(of: person, expectedJSON: expectedJSON, outputFormatting: [.prettyPrinted, .sortedKeys])
     }

@@ -197,17 +197,15 @@ open class ReerJSONEncoder {
             try value.encode(to: encoder)
         }
         
-        guard var root = encoder.takeValue() else {
+        guard let root = encoder.takeValue() else {
             throw EncodingError.invalidValue(value, EncodingError.Context(
                 codingPath: [],
                 debugDescription: "Top-level \(T.self) did not encode any values."
             ))
         }
         
-        let sortKeys = outputFormatting.contains(.sortedKeys)
-        
-        if sortKeys {
-            root = sortMutVal(root, doc: doc)
+        if outputFormatting.contains(.sortedKeys) {
+            sortObjectKeys(root)
         }
         
         yyjson_mut_doc_set_root(doc, root)
@@ -232,126 +230,41 @@ open class ReerJSONEncoder {
             ))
         }
         defer { free(cstr) }
-        lowercaseUnicodeEscapes(cstr, len)
-        
-        if outputFormatting.contains(.prettyPrinted) {
-            var data = Data(bytes: cstr, count: len)
-            addSpaceBeforeColonInPrettyJSON(&data)
-            return data
-        }
         return Data(bytes: cstr, count: len)
     }
     
-    private func addSpaceBeforeColonInPrettyJSON(_ data: inout Data) {
-        // yyjson outputs "key": value but Foundation outputs "key" : value
-        var result = Data()
-        result.reserveCapacity(data.count + data.count / 10)
-        
-        var i = 0
-        let bytes = Array(data)
-        let count = bytes.count
-        var inString = false
-        var escaped = false
-        
-        while i < count {
-            let byte = bytes[i]
-            
-            if escaped {
-                result.append(byte)
-                escaped = false
-                i += 1
-                continue
-            }
-            
-            if byte == 0x5C /* \ */ && inString {
-                result.append(byte)
-                escaped = true
-                i += 1
-                continue
-            }
-            
-            if byte == 0x22 /* " */ {
-                inString = !inString
-                result.append(byte)
-                i += 1
-                continue
-            }
-            
-            if !inString && byte == 0x3A /* : */ && i > 0 && bytes[i-1] == 0x22 /* " */ {
-                result.append(0x20) // space
-                result.append(byte) // :
-                i += 1
-                continue
-            }
-            
-            result.append(byte)
-            i += 1
-        }
-        
-        data = result
-    }
+    // MARK: - In-place sort (no tree rebuild, no extra allocation)
     
-    private func lowercaseUnicodeEscapes(_ buf: UnsafeMutablePointer<CChar>, _ len: Int) {
-        let ptr = UnsafeMutableRawPointer(buf).assumingMemoryBound(to: UInt8.self)
-        var i = 0
-        while i < len - 5 {
-            if ptr[i] == 0x5C /* \ */ && ptr[i+1] == 0x75 /* u */ {
-                for j in (i+2)...(i+5) {
-                    let c = ptr[j]
-                    if c >= 0x41 && c <= 0x46 { // A-F
-                        ptr[j] = c + 32 // a-f
-                    }
-                }
-                i += 6
-            } else {
-                i += 1
-            }
-        }
-    }
-    
-    private func sortMutVal(_ val: UnsafeMutablePointer<yyjson_mut_val>, doc: UnsafeMutablePointer<yyjson_mut_doc>) -> UnsafeMutablePointer<yyjson_mut_val> {
+    private func sortObjectKeys(_ val: UnsafeMutablePointer<yyjson_mut_val>) {
+        typealias MutVal = UnsafeMutablePointer<yyjson_mut_val>
+
         if yyjson_mut_is_obj(val) {
-            let newObj = yyjson_mut_obj(doc)!
-            
-            var pairs: [(key: String, keyVal: UnsafeMutablePointer<yyjson_mut_val>, valVal: UnsafeMutablePointer<yyjson_mut_val>)] = []
-            
+            var pairs: [(keyVal: MutVal, val: MutVal, keyStr: UnsafePointer<CChar>)] = []
+            pairs.reserveCapacity(Int(yyjson_mut_obj_size(val)))
+
             var iter = yyjson_mut_obj_iter()
-            yyjson_mut_obj_iter_init(val, &iter)
+            guard yyjson_mut_obj_iter_init(val, &iter) else { return }
+
             while let keyPtr = yyjson_mut_obj_iter_next(&iter) {
-                guard let valPtr = yyjson_mut_obj_iter_get_val(keyPtr) else { continue }
-                let keyStr: String
-                if let cStr = yyjson_mut_get_str(keyPtr) {
-                    keyStr = String(cString: cStr)
-                } else {
-                    keyStr = ""
-                }
-                pairs.append((key: keyStr, keyVal: keyPtr, valVal: valPtr))
+                guard let valPtr = yyjson_mut_obj_iter_get_val(keyPtr),
+                      let keyStr = yyjson_mut_get_str(keyPtr) else { continue }
+                pairs.append((keyPtr, valPtr, keyStr))
             }
-            
-            pairs.sort { a, b in
-                a.key.utf8.lexicographicallyPrecedes(b.key.utf8)
-            }
-            
+
+            pairs.sort { strcmp($0.keyStr, $1.keyStr) < 0 }
+
+            yyjson_mut_obj_clear(val)
+
             for pair in pairs {
-                let sortedVal = sortMutVal(pair.valVal, doc: doc)
-                let newKey = yyjson_mut_strcpy(doc, pair.key)!
-                yyjson_mut_obj_add(newObj, newKey, sortedVal)
+                sortObjectKeys(pair.val)
+                yyjson_mut_obj_add(val, pair.keyVal, pair.val)
             }
-            
-            return newObj
         } else if yyjson_mut_is_arr(val) {
-            let newArr = yyjson_mut_arr(doc)!
-            
             var iter = yyjson_mut_arr_iter()
-            yyjson_mut_arr_iter_init(val, &iter)
-            while let elemPtr = yyjson_mut_arr_iter_next(&iter) {
-                let sortedElem = sortMutVal(elemPtr, doc: doc)
-                yyjson_mut_arr_append(newArr, sortedElem)
+            guard yyjson_mut_arr_iter_init(val, &iter) else { return }
+            while let elem = yyjson_mut_arr_iter_next(&iter) {
+                sortObjectKeys(elem)
             }
-            
-            return newArr
         }
-        
-        return val
     }
 }

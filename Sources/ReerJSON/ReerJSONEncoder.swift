@@ -233,6 +233,62 @@ open class ReerJSONEncoder {
         return Data(bytes: cstr, count: len)
     }
     
+    #if !os(Linux)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
+    open func encode<T: EncodableWithConfiguration>(
+        _ value: T,
+        configuration: T.EncodingConfiguration
+    ) throws -> Data {
+        let doc = yyjson_mut_doc_new(nil)!
+        defer { yyjson_mut_doc_free(doc) }
+        
+        let encoder = JSONEncoderImpl(doc: doc, codingPath: [], options: options)
+        try value.encode(to: encoder, configuration: configuration)
+        
+        guard let root = encoder.takeValue() else {
+            throw EncodingError.invalidValue(value, EncodingError.Context(
+                codingPath: [],
+                debugDescription: "Top-level \(T.self) did not encode any values."
+            ))
+        }
+        
+        if outputFormatting.contains(.sortedKeys) {
+            sortObjectKeys(root)
+        }
+        
+        yyjson_mut_doc_set_root(doc, root)
+        
+        var writeFlag: yyjson_write_flag = YYJSON_WRITE_NOFLAG
+        if outputFormatting.contains(.prettyPrinted) {
+            writeFlag |= YYJSON_WRITE_PRETTY_TWO_SPACES
+        }
+        if !outputFormatting.contains(.withoutEscapingSlashes) {
+            writeFlag |= YYJSON_WRITE_ESCAPE_SLASHES
+        }
+        
+        var len: Int = 0
+        guard let cstr = yyjson_mut_write(doc, writeFlag, &len) else {
+            throw EncodingError.invalidValue(value, EncodingError.Context(
+                codingPath: [],
+                debugDescription: "Unable to encode the given top-level value to JSON."
+            ))
+        }
+        defer { free(cstr) }
+        return Data(bytes: cstr, count: len)
+    }
+    
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
+    open func encode<T, C>(
+        _ value: T,
+        configuration: C.Type
+    ) throws -> Data
+    where T: EncodableWithConfiguration,
+          C: EncodingConfigurationProviding,
+          T.EncodingConfiguration == C.EncodingConfiguration {
+        try encode(value, configuration: C.encodingConfiguration)
+    }
+    #endif
+    
     // MARK: - In-place sort (no tree rebuild, no extra allocation)
     
     private func sortObjectKeys(_ val: UnsafeMutablePointer<yyjson_mut_val>) {

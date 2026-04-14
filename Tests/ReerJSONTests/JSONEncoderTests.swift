@@ -104,21 +104,27 @@ private struct JSONEncoderTests {
         #expect(result2 == "[]")
     }
     
-//    @Test func encodingTopLevelWithConfiguration() throws {
-//        // CodableTypeWithConfiguration is a struct that conforms to CodableWithConfiguration
-//        let value = CodableTypeWithConfiguration.testValue
-//        let encoder = ReerJSONEncoder()
-//        let decoder = JSONDecoder()
-//        
-//        var decoded = try decoder.decode(
-//            CodableTypeWithConfiguration.self,
-//            from: try encoder.encode(value, configuration: .init(1)),
-//            configuration: .init(1)
-//        )
-//        #expect(decoded == value)
-//        decoded = try decoder.decode(CodableTypeWithConfiguration.self, from: try encoder.encode(value, configuration: CodableTypeWithConfiguration.ConfigProviding.self), configuration: CodableTypeWithConfiguration.ConfigProviding.self)
-//        #expect(decoded == value)
-//    }
+    #if !os(Linux)
+    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
+    @Test func encodingTopLevelWithConfiguration() throws {
+        let value = CodableTypeWithConfiguration.testValue
+        let encoder = ReerJSONEncoder()
+        let decoder = JSONDecoder()
+        
+        var decoded = try decoder.decode(
+            CodableTypeWithConfiguration.self,
+            from: try encoder.encode(value, configuration: .init(1)),
+            configuration: .init(1)
+        )
+        #expect(decoded == value)
+        decoded = try decoder.decode(
+            CodableTypeWithConfiguration.self,
+            from: try encoder.encode(value, configuration: CodableTypeWithConfiguration.ConfigProviding.self),
+            configuration: CodableTypeWithConfiguration.ConfigProviding.self
+        )
+        #expect(decoded == value)
+    }
+    #endif
 
     #if FOUNDATION_EXIT_TESTS
     @Test func encodingConflictedTypeNestedContainersWithTheSameTopLevelKey() async {
@@ -3455,41 +3461,44 @@ fileprivate final class Mapping : Codable, Equatable {
 }
 
 
-//private struct CodableTypeWithConfiguration : CodableWithConfiguration, Equatable {
-//    struct Config {
-//        let num: Int
-//        
-//        init(_ num: Int) {
-//            self.num = num
-//        }
-//    }
-//    
-//    struct ConfigProviding : EncodingConfigurationProviding, DecodingConfigurationProviding {
-//        static var encodingConfiguration: Config { Config(2) }
-//        static var decodingConfiguration: Config { Config(2) }
-//    }
-//    
-//    typealias EncodingConfiguration = Config
-//    typealias DecodingConfiguration = Config
-//    
-//    static let testValue = Self(3)
-//    
-//    let num: Int
-//    
-//    init(_ num: Int) {
-//        self.num = num
-//    }
-//    
-//    func encode(to encoder: Encoder, configuration: Config) throws {
-//        var container = encoder.singleValueContainer()
-//        try container.encode(num + configuration.num)
-//    }
-//    
-//    init(from decoder: Decoder, configuration: Config) throws {
-//        let container = try decoder.singleValueContainer()
-//        num = try container.decode(Int.self) - configuration.num
-//    }
-//}
+#if !os(Linux)
+@available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
+private struct CodableTypeWithConfiguration: CodableWithConfiguration, Equatable {
+    struct Config {
+        let num: Int
+        
+        init(_ num: Int) {
+            self.num = num
+        }
+    }
+    
+    struct ConfigProviding: EncodingConfigurationProviding, DecodingConfigurationProviding {
+        static var encodingConfiguration: Config { Config(2) }
+        static var decodingConfiguration: Config { Config(2) }
+    }
+    
+    typealias EncodingConfiguration = Config
+    typealias DecodingConfiguration = Config
+    
+    static let testValue = Self(3)
+    
+    let num: Int
+    
+    init(_ num: Int) {
+        self.num = num
+    }
+    
+    func encode(to encoder: Encoder, configuration: Config) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(num + configuration.num)
+    }
+    
+    init(from decoder: Decoder, configuration: Config) throws {
+        let container = try decoder.singleValueContainer()
+        num = try container.decode(Int.self) - configuration.num
+    }
+}
+#endif
 
 // MARK: - Helper Types
 

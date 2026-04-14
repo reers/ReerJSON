@@ -432,38 +432,35 @@ extension JSONValue {
         }
 
         if let arr = array {
-            let result = NSMutableArray()
-
-            for element in arr {
-                let foundationValue = try element.toFoundationObject(options: options)
-                result.add(foundationValue)
-            }
-
             if options.contains(.mutableContainers) {
+                let result = NSMutableArray()
+                for element in arr {
+                    result.add(try element.toFoundationObject(options: options))
+                }
                 return result
             } else {
-                return NSArray(array: Array(result))
+                var result: [Any] = []
+                result.reserveCapacity(arr.count)
+                for element in arr {
+                    result.append(try element.toFoundationObject(options: options))
+                }
+                return result as NSArray
             }
         }
 
         if let obj = object {
-            let result = NSMutableDictionary()
-
-            for (key, value) in obj {
-                let foundationValue = try value.toFoundationObject(options: options)
-                result[key] = foundationValue
-            }
-
             if options.contains(.mutableContainers) {
+                let result = NSMutableDictionary()
+                for (key, value) in obj {
+                    result[key] = try value.toFoundationObject(options: options)
+                }
                 return result
             } else {
-                var swiftDict: [String: Any] = [:]
-                for (key, value) in result {
-                    if let keyString = key as? String {
-                        swiftDict[keyString] = value
-                    }
+                var result: [String: Any] = [:]
+                for (key, value) in obj {
+                    result[key] = try value.toFoundationObject(options: options)
                 }
-                return NSDictionary(dictionary: swiftDict)
+                return result as NSDictionary
             }
         }
 

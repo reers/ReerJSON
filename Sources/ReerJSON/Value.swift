@@ -464,6 +464,16 @@ public struct JSONObject: @unchecked Sendable {
         yyObjGet(value, key: key) != nil
     }
 
+    /// The number of key-value pairs in the object.
+    public var count: Int {
+        Int(yyjson_get_len(value))
+    }
+
+    /// Whether the object has no key-value pairs.
+    public var isEmpty: Bool {
+        count == 0
+    }
+
     /// All keys in the object.
     public var keys: [String] {
         let count = Int(yyjson_get_len(value))
@@ -549,6 +559,11 @@ public struct JSONArray: @unchecked Sendable {
     /// The number of elements in the array.
     public var count: Int {
         Int(yyjson_get_len(value))
+    }
+
+    /// Whether the array has no elements.
+    public var isEmpty: Bool {
+        count == 0
     }
 }
 

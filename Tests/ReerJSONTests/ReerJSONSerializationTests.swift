@@ -123,20 +123,16 @@ class SerializationReadingTests: XCTestCase {
         )
     }
 
-    #if !YYJSON_DISABLE_NON_STANDARD
-
-        func testReadWithJSON5() throws {
-            let json = #"{"key": "value",}"#
-            let data = json.data(using: .utf8)!
-            let result =
-                try ReerJSONSerialization.jsonObject(
-                    with: data,
-                    options: .json5Allowed
-                ) as? NSDictionary
-            XCTAssertEqual(result?["key"] as? String, "value")
-        }
-
-    #endif  // !YYJSON_DISABLE_NON_STANDARD
+    func testReadWithJSON5() throws {
+        let json = #"{"key": "value",}"#
+        let data = json.data(using: .utf8)!
+        let result =
+            try ReerJSONSerialization.jsonObject(
+                with: data,
+                options: .json5Allowed
+            ) as? NSDictionary
+        XCTAssertEqual(result?["key"] as? String, "value")
+    }
 
     func testReadInvalidJSON() throws {
         let json = "not valid json"
@@ -166,58 +162,54 @@ class SerializationWritingTests: XCTestCase {
         XCTAssertEqual(json, "[1,2,3,4,5]")
     }
 
-    #if !YYJSON_DISABLE_NON_STANDARD
+    func testWriteAllowsInfAndNaNLiterals() throws {
+        let dict: NSDictionary = [
+            "inf": Double.infinity,
+            "nan": Double.nan,
+        ]
+        let data = try ReerJSONSerialization.data(
+            withJSONObject: dict,
+            options: .allowInfAndNaN
+        )
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertTrue(json.contains("Infinity") || json.contains("inf"))
+        XCTAssertTrue(json.contains("NaN") || json.contains("nan"))
+    }
 
-        func testWriteAllowsInfAndNaNLiterals() throws {
-            let dict: NSDictionary = [
-                "inf": Double.infinity,
-                "nan": Double.nan,
-            ]
-            let data = try ReerJSONSerialization.data(
-                withJSONObject: dict,
-                options: .allowInfAndNaN
-            )
-            let json = String(data: data, encoding: .utf8)!
-            XCTAssertTrue(json.contains("Infinity") || json.contains("inf"))
-            XCTAssertTrue(json.contains("NaN") || json.contains("nan"))
-        }
+    func testWriteInfAndNaNAsNull() throws {
+        let dict: NSDictionary = [
+            "inf": Double.infinity,
+            "nan": Double.nan,
+        ]
+        let data = try ReerJSONSerialization.data(
+            withJSONObject: dict,
+            options: .infAndNaNAsNull
+        )
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertTrue(json.contains("\"inf\":null"))
+        XCTAssertTrue(json.contains("\"nan\":null"))
+    }
 
-        func testWriteInfAndNaNAsNull() throws {
-            let dict: NSDictionary = [
-                "inf": Double.infinity,
-                "nan": Double.nan,
-            ]
-            let data = try ReerJSONSerialization.data(
-                withJSONObject: dict,
-                options: .infAndNaNAsNull
-            )
-            let json = String(data: data, encoding: .utf8)!
-            XCTAssertTrue(json.contains("\"inf\":null"))
-            XCTAssertTrue(json.contains("\"nan\":null"))
-        }
+    func testWriteInfAndNaNAsNullOverridesAllowInfAndNaN() throws {
+        let dict: NSDictionary = [
+            "inf": Double.infinity,
+            "nan": Double.nan,
+        ]
+        let data = try ReerJSONSerialization.data(
+            withJSONObject: dict,
+            options: [.allowInfAndNaN, .infAndNaNAsNull]
+        )
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertTrue(json.contains("\"inf\":null"))
+        XCTAssertTrue(json.contains("\"nan\":null"))
+    }
 
-        func testWriteInfAndNaNAsNullOverridesAllowInfAndNaN() throws {
-            let dict: NSDictionary = [
-                "inf": Double.infinity,
-                "nan": Double.nan,
-            ]
-            let data = try ReerJSONSerialization.data(
-                withJSONObject: dict,
-                options: [.allowInfAndNaN, .infAndNaNAsNull]
-            )
-            let json = String(data: data, encoding: .utf8)!
-            XCTAssertTrue(json.contains("\"inf\":null"))
-            XCTAssertTrue(json.contains("\"nan\":null"))
-        }
-
-        func testWriteNonFiniteWithoutOptionThrows() throws {
-            let dict: NSDictionary = ["value": Double.nan]
-            XCTAssertThrowsError(
-                try ReerJSONSerialization.data(withJSONObject: dict)
-            )
-        }
-
-    #endif  // !YYJSON_DISABLE_NON_STANDARD
+    func testWriteNonFiniteWithoutOptionThrows() throws {
+        let dict: NSDictionary = ["value": Double.nan]
+        XCTAssertThrowsError(
+            try ReerJSONSerialization.data(withJSONObject: dict)
+        )
+    }
 
     private static func jsonString(
         for object: Any,

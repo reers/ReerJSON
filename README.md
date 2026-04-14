@@ -96,6 +96,7 @@ Portions of this project incorporate code from the following source code or test
 
 * [swiftlang/swift-foundation](https://github.com/swiftlang/swift-foundation), licensed under the Apache License, Version 2.0.
 * [michaeleisel/ZippyJSON](https://github.com/michaeleisel/ZippyJSON), licensed under the MIT License.
+* [mattt/swift-yyjson](https://github.com/mattt/swift-yyjson), licensed under the MIT License. The `ReerJSONSerialization`, `Value`, `Configuration`, `Error`, and `Helpers` modules are adapted from this project.
 
 See the LICENSE file for the full text of both licenses.
 
@@ -107,6 +108,7 @@ We would like to express our gratitude to the following projects and their contr
 * **[swiftlang/swift-foundation](https://github.com/swiftlang/swift-foundation)** - For implementation reference and comprehensive test suites that helped ensure compatibility.
 * **[michaeleisel/ZippyJSON](https://github.com/michaeleisel/ZippyJSON)** - For the innovative Swift JSON parsing approach and valuable test cases.
 * **[michaeleisel/JJLISO8601DateFormatter](https://github.com/michaeleisel/JJLISO8601DateFormatter)** - For the high-performance date formatting implementation.
+* **[mattt/swift-yyjson](https://github.com/mattt/swift-yyjson)** - For the `JSONSerialization` replacement and DOM-style `JSONValue`/`JSONDocument` APIs. The `ReerJSONSerialization`, `Value`, `Configuration`, `Error`, and `Helpers` source files and their tests are adapted from this project.
 * **[nixzhu/Ananda](https://github.com/nixzhu/Ananda)** - For the pioneering work in integrating yyjson with Swift and providing architectural inspiration.
 
 Special thanks to all the open-source contributors who made this project possible.

@@ -159,8 +159,7 @@ class JSONEncoderImpl: Encoder {
         }
 
         if T.self == [Double].self { return wrapBulkDoubleArray(value as! [Double]) }
-        if T.self == [[Double]].self { return wrapNestedDoubleArray(value as! [[Double]]) }
-        if T.self == [[[Double]]].self { return wrapTripleNestedDoubleArray(value as! [[[Double]]]) }
+
         if T.self == [String].self { return wrapBulkStringArray(value as! [String]) }
         if T.self == [Bool].self { return wrapBulkBoolArray(value as! [Bool]) }
         if T.self == [Int].self { return wrapBulkIntArray(value as! [Int]) }
@@ -269,20 +268,6 @@ class JSONEncoderImpl: Encoder {
     @inline(__always) func wrapFloatArray(_ arr: [Float]) throws -> UnsafeMutablePointer<yyjson_mut_val> {
         let result = yyjson_mut_arr(doc)!
         for f in arr { yyjson_mut_arr_append(result, try wrapFloat(f, for: nil)) }
-        return result
-    }
-
-    // MARK: - Nested double array fast paths (Canada-killer)
-
-    func wrapNestedDoubleArray(_ arr: [[Double]]) -> UnsafeMutablePointer<yyjson_mut_val> {
-        let result = yyjson_mut_arr(doc)!
-        for inner in arr { yyjson_mut_arr_append(result, wrapBulkDoubleArray(inner)) }
-        return result
-    }
-
-    func wrapTripleNestedDoubleArray(_ arr: [[[Double]]]) -> UnsafeMutablePointer<yyjson_mut_val> {
-        let result = yyjson_mut_arr(doc)!
-        for inner in arr { yyjson_mut_arr_append(result, wrapNestedDoubleArray(inner)) }
         return result
     }
 

@@ -466,7 +466,9 @@ public struct JSONObject: @unchecked Sendable {
 
     /// All keys in the object.
     public var keys: [String] {
+        let count = Int(yyjson_get_len(value))
         var keys: [String] = []
+        keys.reserveCapacity(count)
         var iter = yyjson_obj_iter_with(value)
         while let keyVal = yyjson_obj_iter_next(&iter) {
             if let keyStr = yyjson_get_str(keyVal) {

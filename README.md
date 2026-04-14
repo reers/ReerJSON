@@ -1,5 +1,5 @@
 # ReerJSON
-## A faster version of JSONDecoder & JSONEncoder based on [yyjson](https://github.com/ibireme/yyjson)
+## A faster version of JSONDecoder & JSONEncoder powered by [yyjson](https://github.com/ibireme/yyjson)
 
 ![Coverage: 88%](https://img.shields.io/static/v1?label=coverage&message=88%&color=brightgreen)
 [![SwiftPM compatible](https://img.shields.io/badge/SwiftPM-compatible%20%28iOS%29-brightgreen)](https://swift.org/package-manager/)
@@ -167,11 +167,6 @@ Except for the items listed below, ReerJSON behaves exactly the same as Foundati
 | Unicode escape casing | `\u001f` (lowercase)    | `\u001F` (uppercase). Both are valid JSON per RFC 8259 |
 | Pretty-print colon    | `"key" : value` (space before and after colon) | `"key": value` (space after colon only) |
 
-# TODO
-* [x] Add GitHub workflow for CI.
-* [x] Support `CodableWithConfiguration`.
-* [x] Support JSON5 decoding.
-* [x] Implement ReerJSONEncoder.
 
 # License
 This project is licensed under the MIT License.

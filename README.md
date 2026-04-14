@@ -47,6 +47,9 @@ Depend on `ReerJSON` in your target.
 ```
 
 # Usage
+
+## Decoder && Encoder
+
 `ReerJSONDecoder` and `ReerJSONEncoder` are API-compatible replacements for Foundation's JSONDecoder and JSONEncoder. 
 Simply swap the type and add the import, no other code changes required:
 
@@ -63,6 +66,74 @@ let encoder = ReerJSONEncoder()
 ```
 
 All public interfaces, behaviors, error types, and coding strategies are identical to the Foundation counterparts. The ReerJSON test suite includes exhaustive test cases covering every feature, ensuring full compatibility.
+
+## DOM-Style Access
+
+Parse JSON and access values directly without defining types:
+
+```swift
+import ReerJSON
+
+let json = #"{"users": [{"name": "Alice"}, {"name": "Bob"}]}"#
+let value = try JSONValue(string: json)
+
+// Access nested values with subscripts
+if let name = value["users"]?[0]?["name"]?.string {
+    print(name) // "Alice"
+}
+```
+
+## In-Place Parsing
+
+For maximum performance with large JSON files,
+use in-place parsing to avoid copying the input data:
+
+```swift
+var data = try Data(contentsOf: fileURL)
+let json = try JSONValue.parseInPlace(consuming: &data)
+// `data` is now consumed and should not be used
+```
+
+In-place parsing allows yyjson to parse directly within the input buffer,
+avoiding memory allocation for string storage.
+The `inout` parameter makes it clear that the data is consumed by this operation.
+
+> [!NOTE]
+> For most use cases, the standard `YYJSONValue(data:)` initializer is sufficient.
+> Use in-place parsing only when performance is critical
+> and you can accept the ownership semantics.
+
+## JSONSerialization Alternative
+
+Use `ReerJSONSerialization` with the same API as Foundation's `JSONSerialization`:
+
+```swift
+import ReerJSON
+
+let json = #"{"message": "Hello, World!"}"#
+let data = json.data(using: .utf8)!
+
+let object = try ReerJSONSerialization.jsonObject(with: data)
+if let dict = object as? [String: Any] {
+    print(dict["message"] as? String ?? "") // "Hello, World!"
+}
+```
+
+Configure output formatting with `WritingOptions`:
+
+```swift
+// Pretty printing with 2-space indent (useful for Xcode asset catalogs)
+let data = try ReerJSONSerialization.data(
+    withJSONObject: dict,
+    options: [.indentationTwoSpaces, .sortedKeys]
+)
+
+// ASCII-only output with trailing newline
+let data = try ReerJSONSerialization.data(
+    withJSONObject: dict,
+    options: [.escapeUnicode, .newlineAtEnd]
+)
+```
 
 
 # Differences

@@ -920,4 +920,30 @@ class SerializationEdgeCasesTests: XCTestCase {
         let decoded = try ReerJSONSerialization.jsonObject(with: data) as? NSDictionary
         XCTAssertNotNil(decoded)
     }
+
+    // MARK: - Int64 Precision
+
+    func testLargeInt64PrecisionLoss() throws {
+        // 2^53 + 1 = 9007199254740993, exceeds Double's 53-bit mantissa
+        let json = #"{"value": 9007199254740993}"#
+        let data = json.data(using: .utf8)!
+
+        // JSONValue correctly stores this as Int64
+        let jsonValue = try JSONValue(data: data)
+        XCTAssertEqual(jsonValue["value"]?.number, 9007199254740992.0,
+                       "Double can't represent 2^53+1 exactly, rounds to 2^53")
+
+        // But when converting to Foundation object via ReerJSONSerialization,
+        // the Int64 goes through Double and loses precision
+        let obj = try ReerJSONSerialization.jsonObject(
+            with: data, options: .fragmentsAllowed
+        ) as! NSDictionary
+        let number = obj["value"] as! NSNumber
+
+        // BUG: this should be 9007199254740993 but becomes 9007199254740992
+        // because toFoundationObject uses the `number` property (Double)
+        // instead of reading Int64 directly from storage.
+        XCTAssertEqual(number.int64Value, 9007199254740993,
+                       "Int64 precision should be preserved through Foundation conversion")
+    }
 }

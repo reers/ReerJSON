@@ -416,12 +416,11 @@ extension JSONValue {
             return NSNumber(value: b)
         }
 
+        if let i = int64 {
+            return NSNumber(value: i)
+        }
+
         if let n = number {
-            if n.truncatingRemainder(dividingBy: 1) == 0 {
-                if n >= Double(Int64.min) && n <= Double(Int64.max) {
-                    return NSNumber(value: Int64(n))
-                }
-            }
             return NSNumber(value: n)
         }
 

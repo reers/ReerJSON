@@ -364,7 +364,21 @@ public struct JSONValue: @unchecked Sendable {
         return nil
     }
 
-    /// The number value, or `nil` if not a number.
+    /// The integer value as `Int64`, or `nil` if not stored as an integer.
+    ///
+    /// JSON numbers that were parsed as integers (e.g. `42`, `9007199254740993`)
+    /// are returned exactly. Floating-point numbers (e.g. `3.14`, `1.0`) return `nil`.
+    /// Use ``number`` when a `Double` approximation is acceptable.
+    public var int64: Int64? {
+        if case .numberInt(let v, _) = storage { return v }
+        return nil
+    }
+
+    /// The number value as `Double`, or `nil` if not a number.
+    ///
+    /// Both integers and floating-point numbers are returned as `Double`.
+    /// For integers larger than 2^53, this conversion is lossy.
+    /// Use ``int64`` when exact integer precision is needed.
     public var number: Double? {
         switch storage {
         case .numberInt(let value, _):

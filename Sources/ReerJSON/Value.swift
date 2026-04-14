@@ -1,11 +1,6 @@
 //
-//  Adapted from swift-yyjson by Mattt (https://github.com/mattt/swift-yyjson)
-//  Original code copyright 2026 Mattt (https://mat.tt), licensed under MIT License.
-//
-//  Modifications for ReerJSON:
-//  - Renamed types: removed "YY" prefix (YYJSONValue → JSONValue, etc.)
-//  - YYJSONSerialization → ReerJSONSerialization
-//  - Changed `import Cyyjson` to `import yyjson`
+//  Copyright © 2026 Mattt (https://github.com/mattt)
+//  Copyright © 2026 reers.
 //
 //  Permission is hereby granted, free of charge, to any person obtaining a copy
 //  of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +19,7 @@
 //  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 //  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 //  THE SOFTWARE.
-//
+
 
 import yyjson
 import Foundation

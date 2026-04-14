@@ -122,6 +122,10 @@ protocol StringDecodableDictionary {
     static var elementType: Decodable.Type { get }
 }
 
+protocol _JSONStringDictionaryEncodableMarker {}
+
+extension Dictionary: _JSONStringDictionaryEncodableMarker where Key == String, Value: Encodable {}
+
 extension Dictionary: StringDecodableDictionary where Key == String, Value: Decodable {
     static var elementType: Decodable.Type { return Value.self }
 }
@@ -135,6 +139,14 @@ extension JSONDecoder.KeyDecodingStrategy {
         default:
             return false
         }
+    }
+}
+
+extension JSONEncoder.NonConformingFloatEncodingStrategy {
+    @inline(__always)
+    var isThrow: Bool {
+        if case .throw = self { return true }
+        return false
     }
 }
 

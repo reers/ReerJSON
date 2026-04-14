@@ -96,18 +96,18 @@ private struct JSONEncoderTests {
     
     @Test func encodingTopLevelArrayOfInt() throws {
         let a = [1,2,3]
-        let result1 = String(data: try JSONEncoder().encode(a), encoding: .utf8)
+        let result1 = String(data: try ReerJSONEncoder().encode(a), encoding: .utf8)
         #expect(result1 == "[1,2,3]")
         
         let b : [Int] = []
-        let result2 = String(data: try JSONEncoder().encode(b), encoding: .utf8)
+        let result2 = String(data: try ReerJSONEncoder().encode(b), encoding: .utf8)
         #expect(result2 == "[]")
     }
     
 //    @Test func encodingTopLevelWithConfiguration() throws {
 //        // CodableTypeWithConfiguration is a struct that conforms to CodableWithConfiguration
 //        let value = CodableTypeWithConfiguration.testValue
-//        let encoder = JSONEncoder()
+//        let encoder = ReerJSONEncoder()
 //        let decoder = JSONDecoder()
 //        
 //        var decoded = try decoder.decode(
@@ -155,7 +155,7 @@ private struct JSONEncoderTests {
         await #expect(processExitsWith: .failure) {
             let model = Model.testValue
             // This following test would fail as it attempts to re-encode into already encoded container is invalid. This will always fail
-            _ = try JSONEncoder().encode(model)
+            _ = try ReerJSONEncoder().encode(model)
         }
     }
     #endif
@@ -438,7 +438,7 @@ private struct JSONEncoderTests {
         let expected = "{\"QQQhello\":\"test\"}"
         let encoded = EncodeMe(keyName: "hello")
 
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         let customKeyConversion = { @Sendable (_ path : [CodingKey]) -> CodingKey in
             let key = _TestKey(stringValue: "QQQ" + path.last!.stringValue)!
             return key
@@ -472,7 +472,7 @@ private struct JSONEncoderTests {
         let expected = "{\"QQQouterValue\":{\"QQQnestedValue\":{\"QQQhelloWorld\":\"test\"}}}"
         let encoded = EncodeNestedNested(outerValue: EncodeNested(nestedValue: EncodeMe(keyName: "helloWorld")))
 
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         // We only will mutate this from one thread as we call the encoder synchronously
         nonisolated(unsafe) var callCount = 0
 
@@ -619,7 +619,7 @@ private struct JSONEncoderTests {
 
         // Encoding
         let encoded = DecodeMe5()
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.keyEncodingStrategy = .custom(customKeyConversion)
         let decodingResultData = try encoder.encode(encoded)
         let decodingResultString = String(bytes: decodingResultData, encoding: .utf8)
@@ -630,14 +630,14 @@ private struct JSONEncoderTests {
 
     // MARK: - Encoder Features
     @Test func nestedContainerCodingPaths() {
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         #expect(throws: Never.self) {
             try encoder.encode(NestedContainersTestType())
         }
     }
 
     @Test func superEncoderCodingPaths() {
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         #expect(throws: Never.self) {
             try encoder.encode(NestedContainersTestType(testSuperEncoder: true))
         }
@@ -683,7 +683,7 @@ private struct JSONEncoderTests {
     }
 
     @Test func decodingConcreteTypeParameter() throws {
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         let json = try encoder.encode(Employee.testValue)
 
         let decoder = JSONDecoder()
@@ -720,7 +720,7 @@ private struct JSONEncoderTests {
         //
         // The issue at hand reproduces when you have a referencing encoder (superEncoder() creates one) that has a container on the stack (unkeyedContainer() adds one) that encodes a value going through box_() (Array does that) that encodes something which throws (Float.infinity does that).
         // When reproducing, this will cause a test failure via fatalError().
-        _ = try? JSONEncoder().encode(ReferencingEncoderWrapper([Float.infinity]))
+        _ = try? ReerJSONEncoder().encode(ReferencingEncoderWrapper([Float.infinity]))
     }
 
     @Test func encoderStateThrowOnEncodeCustomDate() {
@@ -737,7 +737,7 @@ private struct JSONEncoderTests {
         }
 
         // The closure needs to push a container before throwing an error to trigger.
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.dateEncodingStrategy = .custom({ _, encoder in
             let _ = encoder.unkeyedContainer()
             enum CustomError : Error { case foo }
@@ -761,7 +761,7 @@ private struct JSONEncoderTests {
         }
 
         // The closure needs to push a container before throwing an error to trigger.
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.dataEncodingStrategy = .custom({ _, encoder in
             let _ = encoder.unkeyedContainer()
             enum CustomError : Error { case foo }
@@ -801,7 +801,7 @@ private struct JSONEncoderTests {
         }
 
         let value = Level1.init(level2: .init(name: "level2"))
-        let data = try JSONEncoder().encode(value)
+        let data = try ReerJSONEncoder().encode(value)
 
         let decodedValue = try JSONDecoder().decode(Level1.self, from: data)
         #expect(value == decodedValue)
@@ -985,7 +985,7 @@ private struct JSONEncoderTests {
         }
 
         let before = DelayedDecodable_ContainerVersion(42)
-        let data = try JSONEncoder().encode(before)
+        let data = try ReerJSONEncoder().encode(before)
 
         let decoded = try JSONDecoder().decode(DelayedDecodable_ContainerVersion.self, from: data)
         #expect(throws: Never.self) {
@@ -1033,7 +1033,7 @@ private struct JSONEncoderTests {
 
     private func _testEncodeFailure<T : Encodable>(of value: T, sourceLocation: SourceLocation = #_sourceLocation) {
         #expect(throws: (any Error).self, "Encode of top-level \(T.self) was expected to fail.", sourceLocation: sourceLocation) {
-            try JSONEncoder().encode(value)
+            try ReerJSONEncoder().encode(value)
         }
     }
 
@@ -1057,7 +1057,7 @@ private struct JSONEncoderTests {
                                    sourceLocation: SourceLocation = #_sourceLocation) where T : Codable, T : Equatable {
         var payload: Data
         do {
-            let encoder = JSONEncoder()
+            let encoder = ReerJSONEncoder()
             encoder.outputFormatting = outputFormatting
             encoder.dateEncodingStrategy = dateEncodingStrategy
             encoder.dataEncodingStrategy = dataEncodingStrategy
@@ -1090,7 +1090,7 @@ private struct JSONEncoderTests {
 
     private func _testRoundTripTypeCoercionFailure<T,U>(of value: T, as type: U.Type, sourceLocation: SourceLocation = #_sourceLocation) where T : Codable, U : Codable {
         #expect(throws: (any Error).self, "Coercion from \(T.self) to \(U.self) was expected to fail.", sourceLocation: sourceLocation) {
-            let data = try JSONEncoder().encode(value)
+            let data = try ReerJSONEncoder().encode(value)
             let _ = try JSONDecoder().decode(U.self, from: data)
         }
     }
@@ -1153,7 +1153,7 @@ private struct JSONEncoderTests {
     @Test func encodingJSONHexUnicodeEscapes() throws {
         let testCases = [
             "\u{0001}\u{0002}\u{0003}": "\"\\u0001\\u0002\\u0003\"",
-            "\u{0010}\u{0018}\u{001f}": "\"\\u0010\\u0018\\u001f\"",
+            "\u{0010}\u{0018}\u{001f}": "\"\\u0010\\u0018\\u001F\"",
         ]
         for (string, json) in testCases {
             _testRoundTrip(of: string, expectedJSON: Data(json.utf8))
@@ -1172,7 +1172,7 @@ private struct JSONEncoderTests {
     
     @Test func nullByte() throws {
         let string = "abc\u{0000}def"
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         let decoder = JSONDecoder()
         
         let data = try encoder.encode([string])
@@ -1511,7 +1511,7 @@ private struct JSONEncoderTests {
     }
 
     @Test func decodeLargeDoubleAsInteger() throws {
-        let data = try JSONEncoder().encode(Double.greatestFiniteMagnitude)
+        let data = try ReerJSONEncoder().encode(Double.greatestFiniteMagnitude)
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(UInt64.self, from: data)
         }
@@ -1533,7 +1533,7 @@ private struct JSONEncoderTests {
         let orig = ["decimalValue" : 1.1]
 
         setlocale(LC_ALL, "fr_FR")
-        let data = try JSONEncoder().encode(orig)
+        let data = try ReerJSONEncoder().encode(orig)
 
 #if os(Windows)
         setlocale(LC_ALL, "en_US")
@@ -1668,7 +1668,7 @@ private struct JSONEncoderTests {
     @Test func infiniteDate() {
         let date = Date(timeIntervalSince1970: .infinity)
 
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
 
         encoder.dateEncodingStrategy = .deferredToDate
         #expect(throws: (any Error).self) {
@@ -1692,7 +1692,7 @@ private struct JSONEncoderTests {
                 // Intentionally nothing.
             }
         }
-        let enc = JSONEncoder()
+        let enc = ReerJSONEncoder()
 
         #expect(throws: (any Error).self) {
             try enc.encode(EncodesNothing())
@@ -1741,7 +1741,7 @@ private struct JSONEncoderTests {
                 // NOTE!!! At present, the order in which the values in the unkeyed container's superEncoders above get inserted into the resulting array depends on the order in which the superEncoders are deinit'd!! This can result in some very unexpected results, and this pattern is not recommended. This test exists just to verify compatibility.
             }
         }
-        let data = try JSONEncoder().encode(SuperEncoding())
+        let data = try ReerJSONEncoder().encode(SuperEncoding())
         let string = String(data: data, encoding: .utf8)!
 
         #expect(string.contains("\"firstSuper\":\"First\""))
@@ -1783,22 +1783,22 @@ private struct JSONEncoderTests {
                 }
             }
         }
-        var data = try JSONEncoder().encode(RedundantEncoding(replacedType: .value, useSuperEncoder: false))
+        var data = try ReerJSONEncoder().encode(RedundantEncoding(replacedType: .value, useSuperEncoder: false))
         #expect(String(data: data, encoding: .utf8) == ("{\"key\":42}"))
 
-        data = try JSONEncoder().encode(RedundantEncoding(replacedType: .value, useSuperEncoder: true))
+        data = try ReerJSONEncoder().encode(RedundantEncoding(replacedType: .value, useSuperEncoder: true))
         #expect(String(data: data, encoding: .utf8) == ("{\"key\":42}"))
 
-        data = try JSONEncoder().encode(RedundantEncoding(replacedType: .keyedContainer, useSuperEncoder: false))
+        data = try ReerJSONEncoder().encode(RedundantEncoding(replacedType: .keyedContainer, useSuperEncoder: false))
         #expect(String(data: data, encoding: .utf8) == ("{\"key\":42}"))
 
-        data = try JSONEncoder().encode(RedundantEncoding(replacedType: .keyedContainer, useSuperEncoder: true))
+        data = try ReerJSONEncoder().encode(RedundantEncoding(replacedType: .keyedContainer, useSuperEncoder: true))
         #expect(String(data: data, encoding: .utf8) == ("{\"key\":42}"))
 
-        data = try JSONEncoder().encode(RedundantEncoding(replacedType: .unkeyedContainer, useSuperEncoder: false))
+        data = try ReerJSONEncoder().encode(RedundantEncoding(replacedType: .unkeyedContainer, useSuperEncoder: false))
         #expect(String(data: data, encoding: .utf8) == ("{\"key\":42}"))
 
-        data = try JSONEncoder().encode(RedundantEncoding(replacedType: .unkeyedContainer, useSuperEncoder: true))
+        data = try ReerJSONEncoder().encode(RedundantEncoding(replacedType: .unkeyedContainer, useSuperEncoder: true))
         #expect(String(data: data, encoding: .utf8) == ("{\"key\":42}"))
     }
 
@@ -1830,7 +1830,7 @@ private struct JSONEncoderTests {
         }
 
         let toEncode = Something(dict: [:])
-        let data = try JSONEncoder().encode(toEncode)
+        let data = try ReerJSONEncoder().encode(toEncode)
         let result = try JSONDecoder().decode(Something.self, from: data)
         #expect(result.dict.count == 0)
     }
@@ -1871,42 +1871,42 @@ private struct JSONEncoderTests {
             }
         }
         await #expect(processExitsWith: .failure) {
-            let _ = try JSONEncoder().encode(RedundantEncoding(subcase: .replaceValueWithKeyedContainer))
+            let _ = try ReerJSONEncoder().encode(RedundantEncoding(subcase: .replaceValueWithKeyedContainer))
         }
         await #expect(processExitsWith: .failure) {
-            let _ = try JSONEncoder().encode(RedundantEncoding(subcase: .replaceValueWithUnkeyedContainer))
+            let _ = try ReerJSONEncoder().encode(RedundantEncoding(subcase: .replaceValueWithUnkeyedContainer))
         }
         await #expect(processExitsWith: .failure) {
-            let _ = try JSONEncoder().encode(RedundantEncoding(subcase: .replaceKeyedContainerWithUnkeyed))
+            let _ = try ReerJSONEncoder().encode(RedundantEncoding(subcase: .replaceKeyedContainerWithUnkeyed))
         }
         await #expect(processExitsWith: .failure) {
-            let _ = try JSONEncoder().encode(RedundantEncoding(subcase: .replaceUnkeyedContainerWithKeyed))
+            let _ = try ReerJSONEncoder().encode(RedundantEncoding(subcase: .replaceUnkeyedContainerWithKeyed))
         }
     }
     #endif
 
     @Test func decodeIfPresent() throws {
-        let emptyDictJSON = try JSONEncoder().encode(DecodeIfPresentAllTypes<KeyedEncodeWithoutNulls>.allNils)
+        let emptyDictJSON = try ReerJSONEncoder().encode(DecodeIfPresentAllTypes<KeyedEncodeWithoutNulls>.allNils)
         let testEmptyDict = try JSONDecoder().decode(DecodeIfPresentAllTypes<UseKeyed>.self, from: emptyDictJSON)
         #expect(testEmptyDict == .allNils)
 
-        let allNullDictJSON = try JSONEncoder().encode(DecodeIfPresentAllTypes<KeyedEncodeWithNulls>.allNils)
+        let allNullDictJSON = try ReerJSONEncoder().encode(DecodeIfPresentAllTypes<KeyedEncodeWithNulls>.allNils)
         let testAllNullDict = try JSONDecoder().decode(DecodeIfPresentAllTypes<UseKeyed>.self, from: allNullDictJSON)
         #expect(testAllNullDict == .allNils)
 
-        let allOnesDictJSON = try JSONEncoder().encode(DecodeIfPresentAllTypes<UseKeyed>.allOnes)
+        let allOnesDictJSON = try ReerJSONEncoder().encode(DecodeIfPresentAllTypes<UseKeyed>.allOnes)
         let testAllOnesDict = try JSONDecoder().decode(DecodeIfPresentAllTypes<UseKeyed>.self, from: allOnesDictJSON)
         #expect(testAllOnesDict == .allOnes)
 
-        let emptyArrayJSON = try JSONEncoder().encode(DecodeIfPresentAllTypes<UnkeyedEncodeWithoutNulls>.allNils)
+        let emptyArrayJSON = try ReerJSONEncoder().encode(DecodeIfPresentAllTypes<UnkeyedEncodeWithoutNulls>.allNils)
         let testEmptyArray = try JSONDecoder().decode(DecodeIfPresentAllTypes<UseUnkeyed>.self, from: emptyArrayJSON)
         #expect(testEmptyArray == .allNils)
 
-        let allNullArrayJSON = try JSONEncoder().encode(DecodeIfPresentAllTypes<UnkeyedEncodeWithNulls>.allNils)
+        let allNullArrayJSON = try ReerJSONEncoder().encode(DecodeIfPresentAllTypes<UnkeyedEncodeWithNulls>.allNils)
         let testAllNullArray = try JSONDecoder().decode(DecodeIfPresentAllTypes<UseUnkeyed>.self, from: allNullArrayJSON)
         #expect(testAllNullArray == .allNils)
 
-        let allOnesArrayJSON = try JSONEncoder().encode(DecodeIfPresentAllTypes<UseUnkeyed>.allOnes)
+        let allOnesArrayJSON = try ReerJSONEncoder().encode(DecodeIfPresentAllTypes<UseUnkeyed>.allOnes)
         let testAllOnesArray = try JSONDecoder().decode(DecodeIfPresentAllTypes<UseUnkeyed>.self, from: allOnesArrayJSON)
         #expect(testAllOnesArray == .allOnes)
     }
@@ -2376,7 +2376,7 @@ extension JSONEncoderTests {
         let expected = "{\"leaveMeAlone\":\"test\"}"
         let toEncode: [String: String] = ["leaveMeAlone": "test"]
 
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         let resultData = try encoder.encode(toEncode)
         let resultString = String(bytes: resultData, encoding: .utf8)
@@ -2406,7 +2406,7 @@ extension JSONEncoderTests {
 
         // Encoding
         let encoded = DecodeMe4(thisIsCamelCase: "test", thisIsCamelCaseToo: "test2")
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         let encodingResultData = try encoder.encode(encoded)
         let encodingResultString = try #require(String(bytes: encodingResultData, encoding: .utf8))
@@ -2433,7 +2433,7 @@ extension JSONEncoderTests {
 
     @Test func decodingKeyStrategyCamelGenerated() throws {
         let encoded = DecodeMe3(thisIsCamelCase: "test")
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         let resultData = try encoder.encode(encoded)
         let resultString = String(bytes: resultData, encoding: .utf8)
@@ -2466,7 +2466,7 @@ extension JSONEncoderTests {
     @Test func encodingDictionaryFailureKeyPath() {
         let toEncode: [String: EncodeFailure] = ["key": EncodeFailure(someValue: Double.nan)]
 
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         do {
             _ = try encoder.encode(toEncode)
@@ -2482,7 +2482,7 @@ extension JSONEncoderTests {
     @Test func encodingDictionaryFailureKeyPathNested() {
         let toEncode: [String: [String: EncodeFailureNested]] = ["key": ["sub_key": EncodeFailureNested(nestedValue: EncodeFailure(someValue: Double.nan))]]
 
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         do {
             _ = try encoder.encode(toEncode)
@@ -2534,7 +2534,7 @@ extension JSONEncoderTests {
             let expected = "{\"\(test.1)\":\"test\"}"
             let encoded = EncodeMe(keyName: test.0)
 
-            let encoder = JSONEncoder()
+            let encoder = ReerJSONEncoder()
             encoder.keyEncodingStrategy = .convertToSnakeCase
             let resultData = try encoder.encode(encoded)
             let resultString = String(bytes: resultData, encoding: .utf8)
@@ -2563,10 +2563,10 @@ extension JSONEncoderTests {
             return
         }
 
-        let prettyPrintEncoder = JSONEncoder()
+        let prettyPrintEncoder = ReerJSONEncoder()
         prettyPrintEncoder.outputFormatting = .prettyPrinted
 
-        for encoder in [JSONEncoder(), prettyPrintEncoder] {
+        for encoder in [ReerJSONEncoder(), prettyPrintEncoder] {
             #expect(throws: Never.self, sourceLocation: sourceLocation) {
                 let reencodedData = try encoder.encode(decoded)
                 let redecodedObjects = try decoder.decode(T.self, from: reencodedData)
@@ -2979,7 +2979,7 @@ extension JSONEncoderTests {
     }
 
     @Test func encodingOutputFormattingPrettyPrintedSortedKeys() {
-        let expectedJSON = "{\n  \"email\" : \"appleseed@apple.com\",\n  \"name\" : \"Johnny Appleseed\"\n}".data(using: .utf8)!
+        let expectedJSON = "{\n  \"email\": \"appleseed@apple.com\",\n  \"name\": \"Johnny Appleseed\"\n}".data(using: .utf8)!
         let person = Person.testValue
         _testRoundTrip(of: person, expectedJSON: expectedJSON, outputFormatting: [.prettyPrinted, .sortedKeys])
     }
@@ -3117,7 +3117,7 @@ extension JSONEncoderTests {
             }
         }
 
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let data = try encoder.encode(EncodesTwice())
         let string = String(data: data, encoding: .utf8)!
@@ -3139,7 +3139,7 @@ extension JSONEncoderTests {
                 try keyed.encode("c", forKey: .a)
             }
         }
-        let encoder = JSONEncoder()
+        let encoder = ReerJSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let data = try encoder.encode(Test())
         let string = String(data: data, encoding: .utf8)!

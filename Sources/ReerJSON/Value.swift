@@ -487,12 +487,10 @@ extension JSONObject: Sequence {
 
 /// Iterator for JSON object key-value pairs.
 public struct JSONObjectIterator: IteratorProtocol {
-    private let value: UnsafeMutablePointer<yyjson_val>
     private let document: Document
     private var iterator: yyjson_obj_iter
 
     internal init(value: UnsafeMutablePointer<yyjson_val>, document: Document) {
-        self.value = value
         self.document = document
         self.iterator = yyjson_obj_iter_with(value)
     }
@@ -562,12 +560,10 @@ extension JSONArray: Sequence {
 
 /// Iterator for JSON array elements.
 public struct JSONArrayIterator: IteratorProtocol {
-    private let value: UnsafeMutablePointer<yyjson_val>
     private let document: Document
     private var iterator: yyjson_arr_iter
 
     internal init(value: UnsafeMutablePointer<yyjson_val>, document: Document) {
-        self.value = value
         self.document = document
         self.iterator = yyjson_arr_iter_with(value)
     }

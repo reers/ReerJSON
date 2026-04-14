@@ -27,6 +27,18 @@ ReerJSON is a really fast JSON parser, and it's inspired by [ZippyJSON](https://
 
 ![CleanShot 2025-09-18 at 13 40 05@2x](https://github.com/user-attachments/assets/3f814fa3-72b0-4005-bea5-7391105aa6dd)
 
+## JSONEncoder
+
+### iOS 17+
+
+<img width="1233" height="708" alt="ios1" src="https://github.com/user-attachments/assets/1abce9a2-a17b-467d-8edb-6082bc79476b" />
+
+
+### macOS
+
+<img width="1234" height="710" alt="macos" src="https://github.com/user-attachments/assets/3ddf4ff8-fa3a-4cae-ad70-a9653f981acb" />
+
+
 
 Tested with ReerJSON 0.3.2, ZippyJSON 1.2.15, IkigaJSON 2.3.2
 

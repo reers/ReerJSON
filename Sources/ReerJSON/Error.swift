@@ -112,32 +112,33 @@ public struct JSONError: Error, Equatable, Sendable, CustomStringConvertible {
 
     /// Create an error from a yyjson read error.
     internal init(parsing error: yyjson_read_err) {
+        let detail = error.msg.map { String(cString: $0) }
         let message: String
         switch error.code {
         case YYJSON_READ_ERROR_INVALID_PARAMETER:
-            message = "Invalid parameter"
+            message = detail ?? "Invalid parameter"
         case YYJSON_READ_ERROR_MEMORY_ALLOCATION:
-            message = "Memory allocation failed"
+            message = detail ?? "Memory allocation failed"
         case YYJSON_READ_ERROR_EMPTY_CONTENT:
-            message = "Empty content"
+            message = detail ?? "Empty content"
         case YYJSON_READ_ERROR_UNEXPECTED_CONTENT:
-            message = "Unexpected content"
+            message = detail ?? "Unexpected content"
         case YYJSON_READ_ERROR_UNEXPECTED_END:
-            message = "Unexpected end of input"
+            message = detail ?? "Unexpected end of input"
         case YYJSON_READ_ERROR_UNEXPECTED_CHARACTER:
-            message = "Unexpected character at position \(error.pos)"
+            message = detail ?? "Unexpected character at position \(error.pos)"
         case YYJSON_READ_ERROR_JSON_STRUCTURE:
-            message = "Invalid JSON structure"
+            message = detail ?? "Invalid JSON structure"
         case YYJSON_READ_ERROR_INVALID_COMMENT:
-            message = "Invalid comment"
+            message = detail ?? "Invalid comment"
         case YYJSON_READ_ERROR_INVALID_NUMBER:
-            message = "Invalid number"
+            message = detail ?? "Invalid number"
         case YYJSON_READ_ERROR_INVALID_STRING:
-            message = "Invalid string"
+            message = detail ?? "Invalid string"
         case YYJSON_READ_ERROR_LITERAL:
-            message = "Invalid literal"
+            message = detail ?? "Invalid literal"
         default:
-            message = "Unknown read error (code: \(error.code))"
+            message = detail ?? "Unknown read error (code: \(error.code))"
         }
 
         self.kind = .invalidJSON
@@ -147,20 +148,21 @@ public struct JSONError: Error, Equatable, Sendable, CustomStringConvertible {
 
     /// Create an error from a yyjson write error.
     internal init(writing error: yyjson_write_err) {
+        let detail = error.msg.map { String(cString: $0) }
         let message: String
         switch error.code {
         case YYJSON_WRITE_ERROR_INVALID_PARAMETER:
-            message = "Invalid parameter"
+            message = detail ?? "Invalid parameter"
         case YYJSON_WRITE_ERROR_MEMORY_ALLOCATION:
-            message = "Memory allocation failed"
+            message = detail ?? "Memory allocation failed"
         case YYJSON_WRITE_ERROR_INVALID_VALUE_TYPE:
-            message = "Invalid value type"
+            message = detail ?? "Invalid value type"
         case YYJSON_WRITE_ERROR_NAN_OR_INF:
-            message = "NaN or Infinity not allowed in JSON"
+            message = detail ?? "NaN or Infinity not allowed in JSON"
         case YYJSON_WRITE_ERROR_INVALID_STRING:
-            message = "Invalid string"
+            message = detail ?? "Invalid string"
         default:
-            message = "Unknown write error (code: \(error.code))"
+            message = detail ?? "Unknown write error (code: \(error.code))"
         }
 
         self.kind = .writeError

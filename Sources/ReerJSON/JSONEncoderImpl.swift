@@ -134,9 +134,7 @@ class JSONEncoderImpl: Encoder {
     func wrapString(_ string: String) -> UnsafeMutablePointer<yyjson_mut_val> {
         var s = string
         return s.withUTF8 { buf in
-            buf.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buf.count) { ptr in
-                yyjson_mut_strncpy(doc, ptr, buf.count)
-            }
+            yyjson_mut_strncpy(doc, buf.baseAddress, buf.count)
         }
     }
 
@@ -407,37 +405,60 @@ private struct YYJSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContaine
     let impl: JSONEncoderImpl
     var codingPath: [CodingKey]
     let object: UnsafeMutablePointer<yyjson_mut_val>
-    var doc: UnsafeMutablePointer<yyjson_mut_doc> { impl.doc }
+    let doc: UnsafeMutablePointer<yyjson_mut_doc>
+    let useDefaultKeys: Bool
+
+    init(impl: JSONEncoderImpl, codingPath: [CodingKey], object: UnsafeMutablePointer<yyjson_mut_val>) {
+        self.impl = impl
+        self.codingPath = codingPath
+        self.object = object
+        self.doc = impl.doc
+        if case .useDefaultKeys = impl.options.keyEncodingStrategy {
+            self.useDefaultKeys = true
+        } else {
+            self.useDefaultKeys = false
+        }
+    }
+
+    @inline(__always)
+    private func _key(_ key: Key) -> String {
+        useDefaultKeys ? key.stringValue : impl.convertedKey(key)
+    }
+
+    @inline(__always)
+    private func _strVal(_ s: String) -> UnsafeMutablePointer<yyjson_mut_val> {
+        impl.wrapString(s)
+    }
 
     @inline(__always)
     private func addToObject(key: String, value: UnsafeMutablePointer<yyjson_mut_val>) {
-        yyjson_mut_obj_put(object, impl.wrapString(key), value)
+        yyjson_mut_obj_put(object, _strVal(key), value)
     }
 
-    mutating func encodeNil(forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: yyjson_mut_null(doc)) }
-    mutating func encode(_ value: Bool, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: yyjson_mut_bool(doc, value)) }
-    mutating func encode(_ value: String, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapString(value)) }
-    mutating func encode(_ value: Double, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: try impl.wrapFloat(value, for: key)) }
-    mutating func encode(_ value: Float, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: try impl.wrapFloat(value, for: key)) }
-    mutating func encode(_ value: Int, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapInt(value)) }
-    mutating func encode(_ value: Int8, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapInt(value)) }
-    mutating func encode(_ value: Int16, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapInt(value)) }
-    mutating func encode(_ value: Int32, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapInt(value)) }
-    mutating func encode(_ value: Int64, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapInt(value)) }
-    mutating func encode(_ value: UInt, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapUInt(value)) }
-    mutating func encode(_ value: UInt8, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapUInt(value)) }
-    mutating func encode(_ value: UInt16, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapUInt(value)) }
-    mutating func encode(_ value: UInt32, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapUInt(value)) }
-    mutating func encode(_ value: UInt64, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapUInt(value)) }
+    mutating func encodeNil(forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_null(doc)) }
+    mutating func encode(_ value: Bool, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_bool(doc, value)) }
+    mutating func encode(_ value: String, forKey key: Key) throws { addToObject(key: _key(key), value: _strVal(value)) }
+    mutating func encode(_ value: Double, forKey key: Key) throws { addToObject(key: _key(key), value: try impl.wrapFloat(value, for: key)) }
+    mutating func encode(_ value: Float, forKey key: Key) throws { addToObject(key: _key(key), value: try impl.wrapFloat(value, for: key)) }
+    mutating func encode(_ value: Int, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_sint(doc, Int64(value))) }
+    mutating func encode(_ value: Int8, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_sint(doc, Int64(value))) }
+    mutating func encode(_ value: Int16, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_sint(doc, Int64(value))) }
+    mutating func encode(_ value: Int32, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_sint(doc, Int64(value))) }
+    mutating func encode(_ value: Int64, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_sint(doc, Int64(value))) }
+    mutating func encode(_ value: UInt, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_uint(doc, UInt64(value))) }
+    mutating func encode(_ value: UInt8, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_uint(doc, UInt64(value))) }
+    mutating func encode(_ value: UInt16, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_uint(doc, UInt64(value))) }
+    mutating func encode(_ value: UInt32, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_uint(doc, UInt64(value))) }
+    mutating func encode(_ value: UInt64, forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_uint(doc, UInt64(value))) }
     #if compiler(>=6.0)
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-    mutating func encode(_ value: Int128, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapInt128(value)) }
+    mutating func encode(_ value: Int128, forKey key: Key) throws { addToObject(key: _key(key), value: impl.wrapInt128(value)) }
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
-    mutating func encode(_ value: UInt128, forKey key: Key) throws { addToObject(key: impl.convertedKey(key), value: impl.wrapUInt128(value)) }
+    mutating func encode(_ value: UInt128, forKey key: Key) throws { addToObject(key: _key(key), value: impl.wrapUInt128(value)) }
     #endif
 
     mutating func encode<T: Encodable>(_ value: T, forKey key: Key) throws {
-        addToObject(key: impl.convertedKey(key), value: try impl.wrapGenericEncodable(value, for: key) ?? yyjson_mut_obj(doc)!)
+        addToObject(key: _key(key), value: try impl.wrapGenericEncodable(value, for: key) ?? yyjson_mut_obj(doc)!)
     }
 
     mutating func nestedContainer<NestedKey: CodingKey>(keyedBy keyType: NestedKey.Type, forKey key: Key) -> KeyedEncodingContainer<NestedKey> {

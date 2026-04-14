@@ -216,13 +216,19 @@ func yyObjGet(
 func yyFromString(
     _ string: String,
     in doc: UnsafeMutablePointer<yyjson_mut_doc>
-) -> UnsafeMutablePointer<yyjson_mut_val> {
+) throws -> UnsafeMutablePointer<yyjson_mut_val> {
     var tmp = string
-    return tmp.withUTF8 { buf in
+    return try tmp.withUTF8 { buf in
+        let result: UnsafeMutablePointer<yyjson_mut_val>?
         if let ptr = buf.baseAddress {
-            return yyjson_mut_strncpy(doc, ptr, buf.count)
+            result = yyjson_mut_strncpy(doc, ptr, buf.count)
+        } else {
+            result = yyjson_mut_strn(doc, "", 0)
         }
-        return yyjson_mut_strn(doc, "", 0)
+        guard let val = result else {
+            throw JSONError.invalidData("Failed to allocate string value")
+        }
+        return val
     }
 }
 

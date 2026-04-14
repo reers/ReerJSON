@@ -334,7 +334,7 @@ public enum ReerJSONSerialization {
     ) throws -> UnsafeMutablePointer<yyjson_mut_val> {
         switch obj {
         case let str as NSString:
-            return yyFromString(str as String, in: doc)
+            return try yyFromString(str as String, in: doc)
 
         case let num as NSNumber:
             let doubleValue = num.doubleValue
@@ -392,7 +392,7 @@ public enum ReerJSONSerialization {
                     throw JSONError.invalidData("Dictionary keys must be strings")
                 }
                 guard let value = dict[key] else { continue }
-                let keyVal = yyFromString(keyString, in: doc)
+                let keyVal = try yyFromString(keyString, in: doc)
                 let valueVal = try foundationObjectToYYJSON(value, doc: doc, options: options)
                 _ = yyjson_mut_obj_put(jsonObj, keyVal, valueVal)
             }

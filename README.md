@@ -29,10 +29,11 @@ ReerJSON is a really fast JSON parser, and it's inspired by [ZippyJSON](https://
 
 ## JSONEncoder
 
-### iOS 17+
-
 <img width="1233" height="708" alt="ios1" src="https://github.com/user-attachments/assets/1abce9a2-a17b-467d-8edb-6082bc79476b" />
+<img width="2474" height="1416" alt="CleanShot 2026-04-15 at 12 43 58@2x" src="https://github.com/user-attachments/assets/f81b77e7-6cb9-4ec1-b11d-9bf5ecfd714e" />
+<img width="2464" height="1418" alt="CleanShot 2026-04-15 at 12 46 05@2x" src="https://github.com/user-attachments/assets/57d76606-a76f-453c-a5e0-f0c77ce2872d" />
 
+> On older/lower-end chips (e.g. A11), yyjson's "build DOM tree then serialize" approach is bottlenecked by smaller caches and weaker branch prediction — exactly the hardware traits yyjson's README states it depends on ("high instruction level parallelism, excellent branch predictor"). IkigaJSON's streaming byte-buffer design avoids building an intermediate tree, making it less sensitive to these hardware limitations and thus faster in certain scenarios on constrained processors
 
 ### macOS
 

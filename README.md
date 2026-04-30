@@ -41,7 +41,7 @@ ReerJSON is a really fast JSON parser, and it's inspired by [ZippyJSON](https://
 
 
 
-Tested with ReerJSON 1.0.0, ZippyJSON 1.2.15, IkigaJSON 2.3.2
+Tested with ReerJSON 1.0.1, ZippyJSON 1.2.15, IkigaJSON 2.3.2
 
 [Code for Benchmarks](https://github.com/Asura19/ReerJSONBenchmark)
 

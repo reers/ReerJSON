@@ -51,7 +51,7 @@ Tested with ReerJSON 1.0.1, ZippyJSON 1.2.15, IkigaJSON 2.3.2
 
 Add dependency in `Package.swift` or project `Package Dependencies`
 ```swift
-.package(url: "https://github.com/reers/ReerJSON.git", from: "1.0.0"),
+.package(url: "https://github.com/reers/ReerJSON.git", from: "1.0.2"),
 ```
 
 Depend on `ReerJSON` in your target.

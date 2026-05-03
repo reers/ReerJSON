@@ -105,6 +105,65 @@ internal final class Document: @unchecked Sendable {
         self.doc = doc
     }
 
+    /// Creates a document by parsing bytes with `STOP_WHEN_DONE`, reporting consumed byte count.
+    ///
+    /// - Parameters:
+    ///   - bytes: Pointer to the JSON bytes (must have `YYJSON_PADDING_SIZE` padding).
+    ///   - count: Number of valid bytes (excluding padding).
+    ///   - options: Options for reading the JSON.
+    ///   - consumedBytes: On success, set to the number of input bytes consumed.
+    /// - Throws: `JSONError` if parsing fails.
+    /// Result of a streaming parse attempt.
+    enum StreamParseResult {
+        case success(Document, consumedBytes: Int)
+        case needMoreData
+    }
+
+    /// Attempts to parse one JSON value from bytes with `STOP_WHEN_DONE`.
+    ///
+    /// - Parameters:
+    ///   - bytes: Pointer to the JSON bytes (must have `YYJSON_PADDING_SIZE` padding).
+    ///   - count: Number of valid bytes (excluding padding).
+    ///   - options: Options for reading the JSON.
+    /// - Returns: `.success` with consumed byte count, or `.needMoreData` if incomplete.
+    /// - Throws: `JSONError` for non-recoverable parse errors.
+    static func streamParse(
+        bytes: UnsafePointer<UInt8>, count: Int,
+        options: JSONReadOptions
+    ) throws -> StreamParseResult {
+        guard count > 0 else { return .needMoreData }
+
+        var error = yyjson_read_err()
+        var flags = options.yyjsonFlags
+        flags |= YYJSON_READ_STOP_WHEN_DONE
+        flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
+
+        let ptr = UnsafeMutablePointer(
+            mutating: UnsafeRawPointer(bytes).assumingMemoryBound(to: CChar.self)
+        )
+        let result = yyjson_read_opts(ptr, count, flags, nil, &error)
+
+        if let doc = result {
+            let consumed = yyjson_doc_get_read_size(doc)
+            let document = Document(alreadyParsed: doc)
+            return .success(document, consumedBytes: consumed)
+        }
+
+        // Incomplete data — need more
+        if error.code == YYJSON_READ_ERROR_UNEXPECTED_END
+            || error.code == YYJSON_READ_ERROR_EMPTY_CONTENT {
+            return .needMoreData
+        }
+
+        throw JSONError(parsing: error)
+    }
+
+    /// Adopts an already-parsed yyjson_doc, taking ownership.
+    init(alreadyParsed doc: UnsafeMutablePointer<yyjson_doc>) {
+        self.doc = doc
+        self.retainedData = nil
+    }
+
     deinit {
         yyjson_doc_free(doc)
     }
@@ -148,6 +207,11 @@ internal final class Document: @unchecked Sendable {
 /// ```
 public struct JSONDocument: ~Copyable, @unchecked Sendable {
     internal let _document: Document
+
+    /// Creates a document from a pre-parsed internal document.
+    internal init(_document: Document) {
+        self._document = _document
+    }
 
     /// Creates a document by parsing JSON data.
     ///

@@ -138,7 +138,7 @@ public struct JSONStreamParser: Sendable {
             }
         }
 
-        if mode == .jsonArray && arrayState != .done && arrayState != .expectOpenBracket {
+        if mode == .jsonArray && arrayState != .done {
             throw JSONError.invalidJSON("Unexpected end of JSON array stream")
         }
 
@@ -157,6 +157,7 @@ public struct JSONStreamParser: Sendable {
     private enum ArrayParseState: Sendable {
         case expectOpenBracket
         case expectElementOrClose
+        case expectElementAfterComma
         case expectCommaOrClose
         case done
     }
@@ -217,13 +218,29 @@ public struct JSONStreamParser: Sendable {
                 results.append(value)
                 arrayState = .expectCommaOrClose
 
+            case .expectElementAfterComma:
+                skipWhitespace()
+                guard readOffset < buffer.count else { break loop }
+                let byte = buffer[buffer.startIndex + readOffset]
+                if byte == UInt8(ascii: "]") {
+                    guard allowsTrailingCommas else {
+                        throw JSONError.invalidJSON("Trailing comma is not allowed in JSON array stream")
+                    }
+                    readOffset += 1
+                    arrayState = .done
+                    break loop
+                }
+                guard let value = try parseOneValue() else { break loop }
+                results.append(value)
+                arrayState = .expectCommaOrClose
+
             case .expectCommaOrClose:
                 skipWhitespace()
                 guard readOffset < buffer.count else { break loop }
                 let byte = buffer[buffer.startIndex + readOffset]
                 if byte == UInt8(ascii: ",") {
                     readOffset += 1
-                    arrayState = .expectElementOrClose
+                    arrayState = .expectElementAfterComma
                 } else if byte == UInt8(ascii: "]") {
                     readOffset += 1
                     arrayState = .done
@@ -239,6 +256,10 @@ public struct JSONStreamParser: Sendable {
             }
         }
 
+        if arrayState == .done {
+            try validateNoTrailingArrayContent()
+        }
+
         return results
     }
 
@@ -251,18 +272,13 @@ public struct JSONStreamParser: Sendable {
         guard available > 0 else { return nil }
 
         let paddingSize = Int(YYJSON_PADDING_SIZE)
-
-        // Build a padded copy so yyjson has enough trailing zero bytes.
-        var padded = Data(count: available + paddingSize)
-        buffer.withUnsafeBytes { srcBuf in
-            padded.withUnsafeMutableBytes { dstBuf in
-                let src = srcBuf.baseAddress!.advanced(by: readOffset)
-                dstBuf.baseAddress!.copyMemory(from: src, byteCount: available)
-            }
+        buffer.append(contentsOf: repeatElement(0 as UInt8, count: paddingSize))
+        defer {
+            buffer.removeLast(paddingSize)
         }
 
-        return try padded.withUnsafeBytes { padBuf -> JSONValue? in
-            let ptr = padBuf.baseAddress!.assumingMemoryBound(to: UInt8.self)
+        return try buffer.withUnsafeBytes { buf -> JSONValue? in
+            let ptr = buf.baseAddress!.advanced(by: readOffset).assumingMemoryBound(to: UInt8.self)
             let result = try Document.streamParse(
                 bytes: ptr, count: available, options: options
             )
@@ -281,6 +297,10 @@ public struct JSONStreamParser: Sendable {
 
     // MARK: - Buffer Helpers
 
+    private var allowsTrailingCommas: Bool {
+        options.contains(.allowTrailingCommas) || options.contains(.json5)
+    }
+
     private mutating func skipWhitespace() {
         let startIdx = buffer.startIndex
         while readOffset < buffer.count {
@@ -294,6 +314,12 @@ public struct JSONStreamParser: Sendable {
         guard readOffset > 0, readOffset > buffer.count / 2 else { return }
         buffer.removeSubrange(buffer.startIndex ..< buffer.startIndex + readOffset)
         readOffset = 0
+    }
+
+    private mutating func validateNoTrailingArrayContent() throws {
+        skipWhitespace()
+        guard readOffset < buffer.count else { return }
+        throw JSONError.invalidJSON("Unexpected content after JSON array stream")
     }
 }
 

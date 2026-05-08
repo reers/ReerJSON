@@ -160,6 +160,17 @@ final class JSONStreamParserJSONArrayTests: XCTestCase {
         XCTAssertEqual(values.count, 3)
     }
 
+    func testTrailingCommaWithoutOptionThrows() throws {
+        var parser = JSONStreamParser(mode: .jsonArray)
+        XCTAssertThrowsError(try parser.parse(Data("[1, 2, 3,]".utf8)))
+    }
+
+    func testTrailingCommaWithJSON5Option() throws {
+        var parser = JSONStreamParser(mode: .jsonArray, options: .json5)
+        let values = try parser.parse(Data("[1, 2, 3,]".utf8))
+        XCTAssertEqual(values.map(\.int64), [1, 2, 3])
+    }
+
     func testCrossChunkArray() throws {
         var parser = JSONStreamParser(mode: .jsonArray)
 
@@ -195,6 +206,16 @@ final class JSONStreamParserJSONArrayTests: XCTestCase {
         var parser = JSONStreamParser(mode: .jsonArray)
         _ = try parser.parse(Data("[1, 2".utf8))
         XCTAssertThrowsError(try parser.finalize())
+    }
+
+    func testEmptyArrayStreamAtFinalizeThrows() throws {
+        var parser = JSONStreamParser(mode: .jsonArray)
+        XCTAssertThrowsError(try parser.finalize())
+    }
+
+    func testTrailingContentAfterArrayThrows() throws {
+        var parser = JSONStreamParser(mode: .jsonArray)
+        XCTAssertThrowsError(try parser.parse(Data("[1] 2".utf8)))
     }
 
     func testStringElements() throws {

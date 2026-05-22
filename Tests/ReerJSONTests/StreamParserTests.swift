@@ -108,6 +108,64 @@ final class JSONStreamParserJSONLinesTests: XCTestCase {
         _ = try parser.parse(Data("{\"incomplete".utf8))
         XCTAssertThrowsError(try parser.finalize())
     }
+
+    // MARK: - Boundary / cross-chunk correctness
+
+    /// Regression: yyjson with STOP_WHEN_DONE will happily parse `1` from
+    /// a buffer that ends exactly at "1" — but the real input might be
+    /// "12345". The parser must defer such tokens until the next chunk or
+    /// `finalize()` confirms there is no continuation.
+    func testCrossChunkSplitNumber() throws {
+        var parser = JSONStreamParser(mode: .jsonLines)
+        // Send "12345\n" split as "1" / "234" / "5\n".
+        let v1 = try parser.parse(Data("1".utf8))
+        XCTAssertTrue(v1.isEmpty, "Bare number at end of buffer must not be yielded yet")
+        let v2 = try parser.parse(Data("234".utf8))
+        XCTAssertTrue(v2.isEmpty)
+        let v3 = try parser.parse(Data("5\n".utf8))
+        XCTAssertEqual(v3.count, 1)
+        XCTAssertEqual(v3[0].int64, 12345)
+        let remaining = try parser.finalize()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testCrossChunkSplitFloat() throws {
+        var parser = JSONStreamParser(mode: .jsonLines)
+        let v1 = try parser.parse(Data("1.2".utf8))
+        XCTAssertTrue(v1.isEmpty)
+        let v2 = try parser.parse(Data("3e".utf8))
+        XCTAssertTrue(v2.isEmpty)
+        let v3 = try parser.parse(Data("4\n".utf8))
+        XCTAssertEqual(v3.count, 1)
+        XCTAssertEqual(v3[0].number, 1.23e4)
+        let remaining = try parser.finalize()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    /// Strings end with `"`, so yyjson can detect truncation directly.
+    /// Splitting them mid-token must still work.
+    func testCrossChunkSplitInsideString() throws {
+        var parser = JSONStreamParser(mode: .jsonLines)
+        let v1 = try parser.parse(Data("\"hel".utf8))
+        XCTAssertTrue(v1.isEmpty)
+        let v2 = try parser.parse(Data("lo\"\n".utf8))
+        XCTAssertEqual(v2.count, 1)
+        XCTAssertEqual(v2[0].string, "hello")
+    }
+
+    /// A value that ends exactly at the buffer boundary without a trailing
+    /// terminator (e.g. {"a":1} with no newline) should still surface on
+    /// finalize().
+    func testFinalizeFlushesTrailingValueWithoutNewline() throws {
+        var parser = JSONStreamParser(mode: .jsonLines)
+        let v1 = try parser.parse(Data("{\"a\":1}".utf8))
+        // May or may not be yielded depending on buffer-end heuristic; the
+        // important contract is that finalize() yields it.
+        let remaining = try parser.finalize()
+        let total = v1 + remaining
+        XCTAssertEqual(total.count, 1)
+        XCTAssertEqual(total[0]["a"]?.int64, 1)
+    }
 }
 
 // MARK: - JSON Array Tests
@@ -218,6 +276,30 @@ final class JSONStreamParserJSONArrayTests: XCTestCase {
         XCTAssertThrowsError(try parser.parse(Data("[1] 2".utf8)))
     }
 
+    /// Regression for cross-chunk numeric splitting inside an array.
+    /// Without the buffer-end deferral, the parser would commit `1` from
+    /// `[1` and then choke on `2` when the second chunk arrives.
+    func testCrossChunkArraySplitNumber() throws {
+        var parser = JSONStreamParser(mode: .jsonArray)
+        let v1 = try parser.parse(Data("[1".utf8))
+        XCTAssertTrue(v1.isEmpty, "Bare number at buffer end must defer")
+        let v2 = try parser.parse(Data("23,456]".utf8))
+        XCTAssertEqual(v2.map(\.int64), [123, 456])
+        let remaining = try parser.finalize()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testCrossChunkArrayTinyChunks() throws {
+        var parser = JSONStreamParser(mode: .jsonArray)
+        let chunks = ["[", "12", "3,", "45", "6", ",", "789", "]"]
+        var all: [JSONValue] = []
+        for chunk in chunks {
+            all += try parser.parse(Data(chunk.utf8))
+        }
+        all += try parser.finalize()
+        XCTAssertEqual(all.map(\.int64), [123, 456, 789])
+    }
+
     func testStringElements() throws {
         var parser = JSONStreamParser(mode: .jsonArray)
         let data = Data("[\"hello\", \"world\"]".utf8)
@@ -302,6 +384,66 @@ final class JSONIncrementalReaderTests: XCTestCase {
             XCTFail("Expected error on second finish()")
         } catch {
             // Expected
+        }
+    }
+
+    func testInvalidJSONIsThrownNotDeferred() throws {
+        let reader = try JSONIncrementalReader(data: Data("{\"key\":}".utf8))
+        do {
+            _ = try reader.finish()
+            XCTFail("Expected an error for malformed JSON")
+        } catch {
+            // Expected
+        }
+    }
+
+    /// Regression: a JSON error message that happens to contain "Empty
+    /// content" or "Unexpected end" used to be misclassified as a
+    /// recoverable "need more data" condition. With error-code-based
+    /// detection, syntactic errors must surface immediately.
+    func testStructuralErrorIsNotMistakenForNeedMore() throws {
+        let reader = try JSONIncrementalReader(data: Data())
+        // Empty buffer is recoverable.
+        do {
+            if let _ = try reader.feed(Data()) {
+                XCTFail("Empty buffer should not yield a document")
+            }
+        } catch {
+            XCTFail("Empty buffer should not throw, got: \(error)")
+        }
+        // But a structurally invalid chunk must throw.
+        let badReader = try JSONIncrementalReader()
+        do {
+            _ = try badReader.feed(Data("[1,]extra".utf8))
+            XCTFail("Structurally invalid JSON should throw")
+        } catch {
+            // Expected
+        }
+    }
+
+    /// `JSONIncrementalReader` is documented as `@unchecked Sendable`; this
+    /// exercises basic concurrent access to confirm the internal lock works.
+    func testConcurrentFeedDoesNotCrash() async throws {
+        let reader = try JSONIncrementalReader()
+        let chunks: [Data] = [
+            Data("{\"a\":".utf8),
+            Data("[1,2,".utf8),
+            Data("3,4,".utf8),
+            Data("5]}".utf8)
+        ]
+        await withTaskGroup(of: Void.self) { group in
+            for chunk in chunks {
+                group.addTask {
+                    _ = try? reader.feed(chunk)
+                }
+            }
+        }
+        // Best-effort: either we've already finished, or finish() completes it.
+        do {
+            let doc = try reader.finish()
+            XCTAssertNotNil(doc.root)
+        } catch {
+            // Race may have finished it via feed(); that's also acceptable.
         }
     }
 }

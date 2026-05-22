@@ -51,6 +51,15 @@ public struct JSONError: Error, Equatable, Sendable, CustomStringConvertible {
     /// The coding path where the error occurred (for decoding errors).
     public let path: String
 
+    /// The underlying yyjson read error code, when this error originates from
+    /// the JSON parser. Zero (`YYJSON_READ_SUCCESS`) when not applicable.
+    ///
+    /// This is primarily used by the streaming APIs to distinguish recoverable
+    /// "need more data" conditions (`YYJSON_READ_ERROR_UNEXPECTED_END`,
+    /// `YYJSON_READ_ERROR_EMPTY_CONTENT`, `YYJSON_READ_ERROR_MORE`) from
+    /// non-recoverable parse errors.
+    internal let readErrorCode: UInt32
+
     public var description: String {
         if path.isEmpty {
             return message
@@ -58,10 +67,11 @@ public struct JSONError: Error, Equatable, Sendable, CustomStringConvertible {
         return "\(message) (at \(path))"
     }
 
-    private init(kind: Kind, message: String, path: String = "") {
+    private init(kind: Kind, message: String, path: String = "", readErrorCode: UInt32 = 0) {
         self.kind = kind
         self.message = message
         self.path = path
+        self.readErrorCode = readErrorCode
     }
 
     // MARK: - Public Factory Methods
@@ -144,6 +154,7 @@ public struct JSONError: Error, Equatable, Sendable, CustomStringConvertible {
         self.kind = .invalidJSON
         self.message = message
         self.path = ""
+        self.readErrorCode = UInt32(error.code)
     }
 
     /// Create an error from a yyjson write error.
@@ -168,5 +179,6 @@ public struct JSONError: Error, Equatable, Sendable, CustomStringConvertible {
         self.kind = .writeError
         self.message = message
         self.path = ""
+        self.readErrorCode = 0
     }
 }

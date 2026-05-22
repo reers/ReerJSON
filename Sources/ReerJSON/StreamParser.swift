@@ -26,8 +26,12 @@ import Foundation
 
 /// The parsing mode for a stream of JSON data.
 public enum JSONStreamMode: Sendable {
-    /// Each line is an independent JSON value (JSON Lines / NDJSON).
+    /// Each top-level JSON value is yielded individually (JSON Lines / NDJSON).
+    ///
+    /// Values may be separated by any JSON whitespace (space, tab, CR, LF);
+    /// strict NDJSON producers should separate values by a single `\n`.
     case jsonLines
+
     /// The stream is a single JSON array whose elements are yielded one by one.
     case jsonArray
 }
@@ -66,6 +70,19 @@ public enum JSONStreamMode: Sendable {
 /// let remaining = try parser.finalize()
 /// // items + remaining contain JSONValues for 1, 2, 3
 /// ```
+///
+/// ## Boundaries between chunks
+///
+/// JSON tokens that have an explicit terminator (strings, objects, arrays,
+/// `true`/`false`/`null`) are always parsed reliably across chunk boundaries.
+/// Bare numeric tokens (e.g. `123` or `1.5e10`) are inherently ambiguous when
+/// a chunk ends exactly at the end of the number — the next chunk may or may
+/// not continue the number. To stay correct, the parser conservatively defers
+/// any value whose parse ends exactly at the buffer end; it will be yielded
+/// after the next ``parse(_:)`` chunk arrives, or on ``finalize()``.
+///
+/// In practice, properly-formed NDJSON terminates every value with a newline,
+/// so this deferral is invisible to the caller.
 public struct JSONStreamParser: Sendable {
 
     /// The parsing mode.
@@ -87,8 +104,8 @@ public struct JSONStreamParser: Sendable {
     ///
     /// - Parameters:
     ///   - mode: The stream format (`.jsonLines` or `.jsonArray`).
-    ///   - options: Options for reading JSON. Note that `.stopWhenDone` is
-    ///     always applied internally and does not need to be specified.
+    ///   - options: Options for reading JSON. The parser internally combines
+    ///     this with `YYJSON_READ_STOP_WHEN_DONE` for boundary detection.
     public init(mode: JSONStreamMode, options: JSONReadOptions = .default) {
         self.mode = mode
         self.options = options
@@ -97,51 +114,29 @@ public struct JSONStreamParser: Sendable {
         self.arrayState = .expectOpenBracket
     }
 
+    // MARK: - Public Parse API
+
     /// Feeds data to the parser and returns all complete JSON values found.
-    ///
-    /// - Parameter data: New data to append to the internal buffer.
-    /// - Returns: An array of fully-parsed ``JSONValue`` items.
-    /// - Throws: ``JSONError`` if malformed JSON is encountered.
     public mutating func parse(_ data: Data) throws -> [JSONValue] {
-        buffer.append(data)
-        return try drainBuffer()
+        if !data.isEmpty { buffer.append(data) }
+        return try drainValues(finalizing: false)
     }
 
     /// Feeds raw bytes to the parser and returns all complete JSON values found.
-    ///
-    /// - Parameter bytes: A buffer pointer to the raw bytes.
-    /// - Returns: An array of fully-parsed ``JSONValue`` items.
-    /// - Throws: ``JSONError`` if malformed JSON is encountered.
     public mutating func parse(bytes: UnsafeBufferPointer<UInt8>) throws -> [JSONValue] {
         if let base = bytes.baseAddress, bytes.count > 0 {
             buffer.append(base, count: bytes.count)
         }
-        return try drainBuffer()
+        return try drainValues(finalizing: false)
     }
 
     /// Signals end-of-stream and returns any remaining JSON values.
     ///
     /// After calling this method, the parser is in a finished state.
     /// Call ``reset()`` to reuse it.
-    ///
-    /// - Returns: An array of any remaining ``JSONValue`` items.
-    /// - Throws: ``JSONError`` if the remaining buffer contains incomplete JSON.
     public mutating func finalize() throws -> [JSONValue] {
-        let results = try drainBuffer()
-
-        skipWhitespace()
-        if readOffset < buffer.count {
-            if mode == .jsonArray {
-                throw JSONError.invalidJSON("Unexpected end of JSON array stream")
-            } else {
-                throw JSONError.invalidJSON("Incomplete JSON value at end of stream")
-            }
-        }
-
-        if mode == .jsonArray && arrayState != .done {
-            throw JSONError.invalidJSON("Unexpected end of JSON array stream")
-        }
-
+        let results = try drainValues(finalizing: true)
+        try validateAtEndOfStream()
         return results
     }
 
@@ -150,6 +145,22 @@ public struct JSONStreamParser: Sendable {
         buffer.removeAll(keepingCapacity: true)
         readOffset = 0
         arrayState = .expectOpenBracket
+    }
+
+    // MARK: - Internal Slice API (for streaming decoders)
+
+    /// Feeds data and returns raw byte slices for each parsed JSON value,
+    /// without constructing intermediate `JSONValue` instances. Used by the
+    /// streaming decoders to avoid an extra serialize-and-reparse round-trip.
+    internal mutating func parseSlices(_ data: Data) throws -> [Data] {
+        if !data.isEmpty { buffer.append(data) }
+        return try drainSlices(finalizing: false)
+    }
+
+    internal mutating func finalizeSlices() throws -> [Data] {
+        let results = try drainSlices(finalizing: true)
+        try validateAtEndOfStream()
+        return results
     }
 
     // MARK: - Private Types
@@ -162,36 +173,72 @@ public struct JSONStreamParser: Sendable {
         case done
     }
 
-    // MARK: - Drain Logic
-
-    private mutating func drainBuffer() throws -> [JSONValue] {
-        compactIfNeeded()
-
-        switch mode {
-        case .jsonLines:
-            return try drainJSONLines()
-        case .jsonArray:
-            return try drainJSONArray()
-        }
+    /// One parsed value's metadata.
+    private struct ParsedItem {
+        /// yyjson document owning the parsed value.
+        let document: Document
+        /// Byte range of this value in `buffer` (relative to `buffer.startIndex`).
+        let range: Range<Int>
     }
 
-    private mutating func drainJSONLines() throws -> [JSONValue] {
+    // MARK: - Drain entry points
+
+    private mutating func drainValues(finalizing: Bool) throws -> [JSONValue] {
+        compactIfNeeded()
+        let items = try drainItems(finalizing: finalizing)
         var results: [JSONValue] = []
-
-        while true {
-            skipWhitespace()
-            guard buffer.count - readOffset > 0 else { break }
-
-            guard let value = try parseOneValue() else { break }
-            results.append(value)
+        results.reserveCapacity(items.count)
+        for item in items {
+            guard let root = item.document.root else {
+                throw JSONError.invalidData("Document has no root value")
+            }
+            results.append(JSONValue(value: root, document: item.document))
         }
-
         return results
     }
 
-    private mutating func drainJSONArray() throws -> [JSONValue] {
-        var results: [JSONValue] = []
+    private mutating func drainSlices(finalizing: Bool) throws -> [Data] {
+        compactIfNeeded()
+        let items = try drainItems(finalizing: finalizing)
+        var slices: [Data] = []
+        slices.reserveCapacity(items.count)
+        let start = buffer.startIndex
+        for item in items {
+            slices.append(buffer.subdata(in: (start + item.range.lowerBound)..<(start + item.range.upperBound)))
+        }
+        return slices
+    }
 
+    private mutating func drainItems(finalizing: Bool) throws -> [ParsedItem] {
+        var items: [ParsedItem] = []
+        switch mode {
+        case .jsonLines:
+            try drainJSONLines(finalizing: finalizing) { items.append($0) }
+        case .jsonArray:
+            try drainJSONArray(finalizing: finalizing) { items.append($0) }
+        }
+        return items
+    }
+
+    // MARK: - Mode-specific drain
+
+    private mutating func drainJSONLines(
+        finalizing: Bool,
+        emit: (ParsedItem) throws -> Void
+    ) throws {
+        while true {
+            skipWhitespace()
+            guard readOffset < buffer.count else { break }
+
+            guard let item = try parseOneItem(finalizing: finalizing) else { break }
+            try emit(item)
+        }
+    }
+
+    private mutating func drainJSONArray(
+        finalizing: Bool,
+        emit: (ParsedItem) throws -> Void
+    ) throws {
         loop: while true {
             skipWhitespace()
 
@@ -214,8 +261,8 @@ public struct JSONStreamParser: Sendable {
                     arrayState = .done
                     break loop
                 }
-                guard let value = try parseOneValue() else { break loop }
-                results.append(value)
+                guard let item = try parseOneItem(finalizing: finalizing) else { break loop }
+                try emit(item)
                 arrayState = .expectCommaOrClose
 
             case .expectElementAfterComma:
@@ -230,8 +277,8 @@ public struct JSONStreamParser: Sendable {
                     arrayState = .done
                     break loop
                 }
-                guard let value = try parseOneValue() else { break loop }
-                results.append(value)
+                guard let item = try parseOneItem(finalizing: finalizing) else { break loop }
+                try emit(item)
                 arrayState = .expectCommaOrClose
 
             case .expectCommaOrClose:
@@ -246,8 +293,9 @@ public struct JSONStreamParser: Sendable {
                     arrayState = .done
                     break loop
                 } else {
+                    let char = Unicode.Scalar(byte)
                     throw JSONError.invalidJSON(
-                        "Expected ',' or ']' in JSON array, got '\(Unicode.Scalar(byte))'"
+                        "Expected ',' or ']' in JSON array, got '\(char)'"
                     )
                 }
 
@@ -259,45 +307,54 @@ public struct JSONStreamParser: Sendable {
         if arrayState == .done {
             try validateNoTrailingArrayContent()
         }
-
-        return results
     }
 
     // MARK: - Core Parse
 
-    /// Tries to parse one JSON value starting at `readOffset`.
-    /// Returns `nil` if more data is needed.
-    private mutating func parseOneValue() throws -> JSONValue? {
+    /// Attempts to parse one JSON value starting at `readOffset`.
+    ///
+    /// Returns `nil` when more data is required to confidently advance:
+    /// either yyjson reported incomplete input, or the parsed value ends
+    /// exactly at the buffer end and we are not finalizing (which would be
+    /// ambiguous for unterminated numeric tokens).
+    private mutating func parseOneItem(finalizing: Bool) throws -> ParsedItem? {
         let available = buffer.count - readOffset
         guard available > 0 else { return nil }
 
-        let paddingSize = Int(YYJSON_PADDING_SIZE)
-        buffer.append(contentsOf: repeatElement(0 as UInt8, count: paddingSize))
-        defer {
-            buffer.removeLast(paddingSize)
+        // yyjson_read_opts() in non-INSITU mode allocates its own padded buffer
+        // and copies the input — so we do not need to add YYJSON_PADDING_SIZE
+        // bytes ourselves here.
+        let startOffset = readOffset
+        let result: Document.StreamParseResult = try buffer.withUnsafeBytes { buf in
+            guard let base = buf.baseAddress else { return .needMoreData }
+            let ptr = base.advanced(by: startOffset).assumingMemoryBound(to: UInt8.self)
+            return try Document.streamParse(bytes: ptr, count: available, options: options)
         }
 
-        return try buffer.withUnsafeBytes { buf -> JSONValue? in
-            let ptr = buf.baseAddress!.advanced(by: readOffset).assumingMemoryBound(to: UInt8.self)
-            let result = try Document.streamParse(
-                bytes: ptr, count: available, options: options
-            )
-            switch result {
-            case .success(let doc, let consumed):
-                guard let root = doc.root else {
-                    throw JSONError.invalidData("Document has no root value")
-                }
-                readOffset += consumed
-                return JSONValue(value: root, document: doc)
-            case .needMoreData:
+        switch result {
+        case .needMoreData:
+            return nil
+        case .success(let doc, let consumed):
+            let endOffset = startOffset + consumed
+
+            // Boundary safety:
+            // A successful parse that ends exactly at the buffer end may be a
+            // truncated numeric token (e.g. we have "12" so far but the source
+            // is actually "123"). yyjson cannot tell the difference. Defer the
+            // value until either more data arrives or the caller finalizes.
+            if !finalizing && endOffset >= buffer.count {
                 return nil
             }
+            readOffset = endOffset
+            return ParsedItem(document: doc, range: startOffset..<endOffset)
         }
     }
 
     // MARK: - Buffer Helpers
 
     private var allowsTrailingCommas: Bool {
+        // `.json5` is a composite that already includes
+        // YYJSON_READ_ALLOW_TRAILING_COMMAS, but check both for clarity.
         options.contains(.allowTrailingCommas) || options.contains(.json5)
     }
 
@@ -321,21 +378,36 @@ public struct JSONStreamParser: Sendable {
         guard readOffset < buffer.count else { return }
         throw JSONError.invalidJSON("Unexpected content after JSON array stream")
     }
+
+    private mutating func validateAtEndOfStream() throws {
+        skipWhitespace()
+        if readOffset < buffer.count {
+            if mode == .jsonArray {
+                throw JSONError.invalidJSON("Unexpected end of JSON array stream")
+            } else {
+                throw JSONError.invalidJSON("Incomplete JSON value at end of stream")
+            }
+        }
+        if mode == .jsonArray && arrayState != .done {
+            throw JSONError.invalidJSON("Unexpected end of JSON array stream")
+        }
+    }
 }
 
 // MARK: - JSONIncrementalReader
 
-/// An incremental reader for large JSON documents.
+/// An incremental reader for a single large JSON document.
 ///
 /// Feed chunks of a single large JSON document with ``feed(_:)``.
-/// Data is accumulated internally. Call ``finish()`` to parse the complete
-/// document, or use ``feed(_:)`` which attempts a parse after each chunk.
+/// Data is accumulated internally. ``feed(_:)`` will attempt to parse the
+/// accumulated buffer after each chunk; ``finish()`` parses any remaining
+/// buffered data and finalizes the reader.
 ///
 /// ```swift
-/// let reader = try JSONIncrementalReader(data: firstChunk)
+/// let reader = try JSONIncrementalReader()
 /// for try await chunk in stream {
 ///     if let doc = try reader.feed(chunk) {
-///         print(doc.root?["key"]?.string ?? "")
+///         // doc.root is now available
 ///         break
 ///     }
 /// }
@@ -344,69 +416,78 @@ public struct JSONStreamParser: Sendable {
 /// - Note: For a document already fully in memory, prefer
 ///   ``JSONDocument/init(data:options:)`` which is faster.
 ///   This type is for when data arrives in chunks over the network.
+///
+/// - Note: This type is internally synchronized; `feed`, `finish`, and
+///   property access are safe to call concurrently from multiple threads.
+///
+/// - Important: Internally, ``feed(_:)`` attempts a fresh parse over the
+///   entire accumulated buffer on each call. For a document of total size
+///   `N` arriving as `K` chunks, the cost is `O(N · K)`. When `K` is small
+///   (e.g. a handful of large network chunks) this is effectively `O(N)`.
+///   If you expect a very large number of small chunks, consider buffering
+///   them yourself and constructing a single ``JSONDocument`` once you've
+///   received the entire document.
 public final class JSONIncrementalReader: @unchecked Sendable {
 
-    private var buffer: Data
-    private let options: JSONReadOptions
-    private var finished: Bool
+    private let lock = LockedState<Void>()
+    private var parser: IncrementalParser
+    private var finished: Bool = false
 
-    /// Creates a new incremental reader with initial data.
+    /// The total number of buffered input bytes.
+    public var bufferedByteCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return parser.count
+    }
+
+    /// Creates a new incremental reader.
     ///
     /// - Parameters:
-    ///   - data: The first chunk of JSON data.
+    ///   - data: An initial chunk of JSON data (may be empty).
     ///   - options: Options for reading JSON.
-    public init(data: Data, options: JSONReadOptions = .default) throws {
-        self.buffer = data
-        self.options = options
-        self.finished = false
+    public init(
+        data: Data = Data(),
+        options: JSONReadOptions = .default
+    ) throws {
+        self.parser = IncrementalParser(initialData: data, options: options)
     }
 
     /// Feeds more data and attempts to parse the accumulated buffer.
     ///
-    /// - Parameter data: Additional JSON data.
+    /// - Parameter data: Additional JSON data (may be empty to retry).
     /// - Returns: A ``JSONDocument`` if the buffer contains a complete document,
     ///   or `nil` if more data is needed.
-    /// - Throws: ``JSONError`` for non-recoverable parse errors.
+    /// - Throws: ``JSONError`` for non-recoverable parse errors, or if the
+    ///   reader has already produced a complete document.
     public func feed(_ data: Data) throws -> JSONDocument? {
+        lock.lock(); defer { lock.unlock() }
         guard !finished else {
             throw JSONError.invalidJSON("Incremental reader already finished")
         }
-        buffer.append(data)
-        return try attemptParse()
+        parser.append(data)
+        switch try parser.read() {
+        case .success(let doc):
+            finished = true
+            return JSONDocument(_document: doc)
+        case .needMoreData:
+            return nil
+        }
     }
 
     /// Signals end-of-stream and returns the completed document.
     ///
-    /// All accumulated data is parsed as a single JSON document.
-    ///
     /// - Returns: The parsed ``JSONDocument``.
     /// - Throws: ``JSONError`` if the document is incomplete or malformed.
     public func finish() throws -> JSONDocument {
+        lock.lock(); defer { lock.unlock() }
         guard !finished else {
             throw JSONError.invalidJSON("Incremental reader already finished")
         }
-        finished = true
-        let doc = try Document(data: buffer, options: options)
-        return JSONDocument(_document: doc)
-    }
-
-    // MARK: - Private
-
-    private func attemptParse() throws -> JSONDocument? {
-        // Try parsing the accumulated data. If it's complete, return the doc.
-        // If incomplete, return nil to request more data.
-        do {
-            let doc = try Document(data: buffer, options: options)
+        switch try parser.read() {
+        case .success(let doc):
             finished = true
             return JSONDocument(_document: doc)
-        } catch let error as JSONError {
-            // If the error indicates incomplete data, we need more
-            if error.message.contains("unexpected end")
-                || error.message.contains("Unexpected end")
-                || error.message.contains("Empty content") {
-                return nil
-            }
-            throw error
+        case .needMoreData:
+            throw JSONError.invalidJSON("Incomplete JSON value at end of stream")
         }
     }
 }

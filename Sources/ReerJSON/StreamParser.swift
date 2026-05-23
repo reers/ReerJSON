@@ -396,6 +396,20 @@ public struct JSONStreamParser: Sendable {
 
 // MARK: - JSONIncrementalReader
 
+/// The outcome of feeding a chunk of bytes to a ``JSONIncrementalReader``.
+///
+/// This is intentionally a non-copyable enum rather than `JSONDocument?`
+/// because ``JSONDocument`` is `~Copyable`, and `Optional<~Copyable>` is
+/// not yet supported by Swift 5.10 (the minimum required by this package on
+/// Linux). Using a custom enum keeps the API ergonomic on every supported
+/// toolchain.
+public enum JSONIncrementalReadResult: ~Copyable {
+    /// The reader has fully assembled a complete document.
+    case ready(JSONDocument)
+    /// The reader needs more input before a document can be produced.
+    case needMoreData
+}
+
 /// An incremental reader for a single large JSON document.
 ///
 /// Feed chunks of a single large JSON document with ``feed(_:)``.
@@ -406,9 +420,12 @@ public struct JSONStreamParser: Sendable {
 /// ```swift
 /// let reader = try JSONIncrementalReader()
 /// for try await chunk in stream {
-///     if let doc = try reader.feed(chunk) {
+///     switch try reader.feed(chunk) {
+///     case .ready(let doc):
 ///         // doc.root is now available
-///         break
+///         return doc
+///     case .needMoreData:
+///         continue
 ///     }
 /// }
 /// ```
@@ -454,11 +471,12 @@ public final class JSONIncrementalReader: @unchecked Sendable {
     /// Feeds more data and attempts to parse the accumulated buffer.
     ///
     /// - Parameter data: Additional JSON data (may be empty to retry).
-    /// - Returns: A ``JSONDocument`` if the buffer contains a complete document,
-    ///   or `nil` if more data is needed.
+    /// - Returns: ``JSONIncrementalReadResult/ready(_:)`` if the buffer
+    ///   contains a complete document, or
+    ///   ``JSONIncrementalReadResult/needMoreData`` if more data is required.
     /// - Throws: ``JSONError`` for non-recoverable parse errors, or if the
     ///   reader has already produced a complete document.
-    public func feed(_ data: Data) throws -> JSONDocument? {
+    public func feed(_ data: Data) throws -> JSONIncrementalReadResult {
         lock.lock(); defer { lock.unlock() }
         guard !finished else {
             throw JSONError.invalidJSON("Incremental reader already finished")
@@ -467,9 +485,9 @@ public final class JSONIncrementalReader: @unchecked Sendable {
         switch try parser.read() {
         case .success(let doc):
             finished = true
-            return JSONDocument(_document: doc)
+            return .ready(JSONDocument(_document: doc))
         case .needMoreData:
-            return nil
+            return .needMoreData
         }
     }
 

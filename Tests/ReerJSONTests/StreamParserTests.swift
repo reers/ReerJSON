@@ -333,16 +333,18 @@ final class JSONIncrementalReaderTests: XCTestCase {
 
     func testMultipleChunks() throws {
         let reader = try JSONIncrementalReader(data: Data("{\"ke".utf8))
-        // First feed should need more data
-        do {
-            if let doc = try reader.feed(Data("y\":\"val".utf8)) {
-                XCTFail("Should need more data, got doc with root: \(String(describing: doc.root))")
-            }
+        // First feed should need more data.
+        switch try reader.feed(Data("y\":\"val".utf8)) {
+        case .ready(let doc):
+            XCTFail("Should need more data, got doc with root: \(String(describing: doc.root))")
+        case .needMoreData:
+            break
         }
-        // Second feed should complete
-        if let doc = try reader.feed(Data("ue\"}".utf8)) {
+        // Second feed should complete.
+        switch try reader.feed(Data("ue\"}".utf8)) {
+        case .ready(let doc):
             XCTAssertEqual(doc.root?["key"]?.string, "value")
-        } else {
+        case .needMoreData:
             XCTFail("Should have completed parsing")
         }
     }
@@ -360,12 +362,15 @@ final class JSONIncrementalReaderTests: XCTestCase {
         var offset = min(chunkSize, jsonData.count)
 
         var parsed = false
-        while offset < jsonData.count {
+        feedLoop: while offset < jsonData.count {
             let end = min(offset + chunkSize, jsonData.count)
             let chunk = Data(jsonData[offset..<end])
-            if let doc = try reader.feed(chunk) {
+            switch try reader.feed(chunk) {
+            case .ready(let doc):
                 XCTAssertEqual(doc.rootArray?.count, 100)
                 parsed = true
+                break feedLoop
+            case .needMoreData:
                 break
             }
             offset = end
@@ -405,8 +410,11 @@ final class JSONIncrementalReaderTests: XCTestCase {
         let reader = try JSONIncrementalReader(data: Data())
         // Empty buffer is recoverable.
         do {
-            if let _ = try reader.feed(Data()) {
+            switch try reader.feed(Data()) {
+            case .ready:
                 XCTFail("Empty buffer should not yield a document")
+            case .needMoreData:
+                break
             }
         } catch {
             XCTFail("Empty buffer should not throw, got: \(error)")

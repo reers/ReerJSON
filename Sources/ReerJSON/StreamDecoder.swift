@@ -180,23 +180,28 @@ struct ByteChunkBuffer: Sendable {
 
     mutating func readChunk(
         nextByte: () async throws -> UInt8?
-    ) async rethrows -> (data: Data, reachedEnd: Bool) {
+    ) async rethrows -> (byteCount: Int, reachedEnd: Bool) {
         var count = 0
         while count < storage.count {
             guard let byte = try await nextByte() else {
-                return (data(forByteCount: count), true)
+                return (count, true)
             }
             storage[count] = byte
             count += 1
         }
-        return (data(forByteCount: count), false)
+        return (count, false)
     }
 
-    private func data(forByteCount count: Int) -> Data {
-        guard count > 0 else { return Data() }
-        return storage.withUnsafeBufferPointer { buffer in
-            guard let baseAddress = buffer.baseAddress else { return Data() }
-            return Data(bytes: baseAddress, count: count)
+    func withUnsafeBufferPointer<R>(
+        byteCount count: Int,
+        _ body: (UnsafeBufferPointer<UInt8>) throws -> R
+    ) rethrows -> R {
+        try storage.withUnsafeBufferPointer { buffer in
+            let clampedCount = Swift.min(Swift.max(count, 0), buffer.count)
+            return try body(UnsafeBufferPointer(
+                start: buffer.baseAddress,
+                count: clampedCount
+            ))
         }
     }
 }
@@ -301,9 +306,11 @@ where Source.Element == UInt8 {
                     return nil
                 }
 
-                let chunk = try await readChunk()
-                if !chunk.isEmpty {
-                    let values = try parser.parse(chunk)
+                let byteCount = try await readChunk()
+                if byteCount > 0 {
+                    let values = try chunkBuffer.withUnsafeBufferPointer(byteCount: byteCount) {
+                        try parser.parse(bytes: $0)
+                    }
                     if !values.isEmpty {
                         pending.replace(with: values)
                         continue
@@ -322,13 +329,13 @@ where Source.Element == UInt8 {
         }
 
         /// Reads up to `chunkSize` bytes into reusable storage before
-        /// constructing the `Data` chunk for parsing.
-        private mutating func readChunk() async throws -> Data {
+        /// passing the borrowed bytes directly to the parser.
+        private mutating func readChunk() async throws -> Int {
             let chunk = try await chunkBuffer.readChunk {
                 try await sourceIterator.next()
             }
             sourceExhausted = chunk.reachedEnd
-            return chunk.data
+            return chunk.byteCount
         }
     }
 }

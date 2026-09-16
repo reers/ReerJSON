@@ -743,7 +743,10 @@ final class AsyncStreamTests: XCTestCase {
             return bytes[index]
         }
 
-        XCTAssertEqual(first.data, Data("abcd".utf8))
+        let firstData = buffer.withUnsafeBufferPointer(byteCount: first.byteCount) {
+            Data(buffer: $0)
+        }
+        XCTAssertEqual(firstData, Data("abcd".utf8))
         XCTAssertFalse(first.reachedEnd)
         XCTAssertEqual(buffer.capacity, 4)
 
@@ -753,7 +756,10 @@ final class AsyncStreamTests: XCTestCase {
             return bytes[index]
         }
 
-        XCTAssertEqual(second.data, Data("ef".utf8))
+        let secondData = buffer.withUnsafeBufferPointer(byteCount: second.byteCount) {
+            Data(buffer: $0)
+        }
+        XCTAssertEqual(secondData, Data("ef".utf8))
         XCTAssertTrue(second.reachedEnd)
         XCTAssertEqual(buffer.capacity, 4)
     }
@@ -769,7 +775,10 @@ final class AsyncStreamTests: XCTestCase {
             return bytes[index]
         }
 
-        XCTAssertEqual(first.data, Data("a".utf8))
+        let firstData = buffer.withUnsafeBufferPointer(byteCount: first.byteCount) {
+            Data(buffer: $0)
+        }
+        XCTAssertEqual(firstData, Data("a".utf8))
         XCTAssertFalse(first.reachedEnd)
         XCTAssertEqual(buffer.capacity, 1)
     }

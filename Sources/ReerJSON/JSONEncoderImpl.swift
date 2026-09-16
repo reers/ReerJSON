@@ -283,8 +283,10 @@ class JSONEncoderImpl: Encoder {
             return try wrapFloat(1000.0 * date.timeIntervalSince1970, for: additionalKey)
         case .iso8601:
             return wrapString(_iso8601Formatter.string(from: date))
+        #if !os(Linux)
         case .formatted(let formatter):
             return wrapString(formatter.string(from: date))
+        #endif
         case .custom(let closure):
             return try _encodeNestedValue(for: additionalKey) { try closure(date, self) } ?? yyjson_mut_obj(doc)
         @unknown default: fatalError()

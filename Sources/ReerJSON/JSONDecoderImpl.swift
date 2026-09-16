@@ -267,6 +267,7 @@ final class JSONDecoderImpl: Decoder {
                 ))
             }
             return date
+        #if !os(Linux)
         case .formatted(let formatter):
             let string = try unboxString(from: value, for: codingPathNode, additionalKey)
             guard let date = formatter.date(from: string) else {
@@ -276,6 +277,7 @@ final class JSONDecoderImpl: Decoder {
                 ))
             }
             return date
+        #endif
         case .custom(let closure):
             return try with(value: value, path: codingPathNode.appending(additionalKey)) {
                 try closure(self)

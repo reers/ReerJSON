@@ -148,15 +148,19 @@ open class ReerJSONDecoder {
     /// Set to `true` to allow parsing of JSON5. Defaults to `false`.
     open var allowsJSON5: Bool {
         get {
-            options.json5
+            optionsLock.lock()
+            defer { optionsLock.unlock() }
+            return options.json5
         }
         set {
+            optionsLock.lock()
+            defer { optionsLock.unlock() }
             options.json5 = newValue
         }
     }
 
     /// Options set on the top-level encoder to pass down the decoding hierarchy.
-    struct Options {
+    struct Options: Sendable {
         var dateDecodingStrategy: JSONDecoder.DateDecodingStrategy = .deferredToDate
         var dataDecodingStrategy: JSONDecoder.DataDecodingStrategy = .base64
         var nonConformingFloatDecodingStrategy: JSONDecoder.NonConformingFloatDecodingStrategy = .throw
@@ -168,6 +172,12 @@ open class ReerJSONDecoder {
     /// The options set on the top-level decoder.
     fileprivate var options = Options()
     fileprivate let optionsLock = LockedState<Void>()
+
+    func optionsSnapshot() -> Options {
+        optionsLock.lock()
+        defer { optionsLock.unlock() }
+        return options
+    }
 
     // MARK: - Constructing a JSON Decoder
 
@@ -185,6 +195,7 @@ open class ReerJSONDecoder {
     /// - throws: `DecodingError.dataCorrupted` if values requested from the payload are corrupted, or if the given data is not valid JSON.
     /// - throws: An error if any value throws an error during decoding.
     open func decode<T: Decodable>(_ type: T.Type, from data: Data, path: [String] = []) throws -> T {
+        let options = optionsSnapshot()
         var flag: yyjson_read_flag = YYJSON_READ_NUMBER_AS_RAW
         if options.json5 {
             flag |= YYJSON_READ_JSON5
@@ -197,7 +208,7 @@ open class ReerJSONDecoder {
             )
         }
         guard let doc else {
-            return try decodeWithFoundationDecoder(type, from: data)
+            return try decodeWithFoundationDecoder(type, from: data, options: options)
         }
         
         defer {
@@ -210,7 +221,27 @@ open class ReerJSONDecoder {
         }
         
         let json = JSON(pointer: pointer)
-        let impl = JSONDecoderImpl(json: json, userInfo: userInfo, codingPathNode: .root, options: options)
+        let impl = JSONDecoderImpl(json: json, userInfo: options.userInfo, codingPathNode: .root, options: options)
+        return try impl.unbox(json, as: type, for: .root, _CodingKey?.none)
+    }
+
+    func decodeParsedValue<T: Decodable>(_ type: T.Type, from value: JSONValue, path: [String] = []) throws -> T {
+        try Self.decodeParsedValue(type, from: value, path: path, options: optionsSnapshot())
+    }
+
+    static func decodeParsedValue<T: Decodable>(
+        _ type: T.Type,
+        from value: JSONValue,
+        path: [String] = [],
+        options: Options
+    ) throws -> T {
+        var pointer = value.rawValue
+        for key in path {
+            pointer = key.withCString { yyjson_obj_get(pointer, $0) }
+        }
+
+        let json = JSON(pointer: pointer)
+        let impl = JSONDecoderImpl(json: json, userInfo: options.userInfo, codingPathNode: .root, options: options)
         return try impl.unbox(json, as: type, for: .root, _CodingKey?.none)
     }
     
@@ -238,6 +269,7 @@ open class ReerJSONDecoder {
         path: [String] = [],
         configuration: T.DecodingConfiguration
     ) throws -> T {
+        let options = optionsSnapshot()
         var flag: yyjson_read_flag = YYJSON_READ_NUMBER_AS_RAW
         if options.json5 {
             flag |= YYJSON_READ_JSON5
@@ -251,7 +283,7 @@ open class ReerJSONDecoder {
         }
         guard let doc else {
             if #available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *) {
-                return try decodeWithFoundationDecoder(type, from: data, configuration: configuration)
+                return try decodeWithFoundationDecoder(type, from: data, options: options, configuration: configuration)
             } else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: [],
@@ -270,7 +302,7 @@ open class ReerJSONDecoder {
         }
         
         let json = JSON(pointer: pointer)
-        let impl = JSONDecoderImpl(json: json, userInfo: userInfo, codingPathNode: .root, options: options)
+        let impl = JSONDecoderImpl(json: json, userInfo: options.userInfo, codingPathNode: .root, options: options)
         return try impl.unbox(json, as: type, configuration: configuration, for: .root,  _CodingKey?.none)
     }
     
@@ -288,19 +320,27 @@ open class ReerJSONDecoder {
     }
     #endif
     
-    func decodeWithFoundationDecoder<T : Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    func decodeWithFoundationDecoder<T : Decodable>(
+        _ type: T.Type,
+        from data: Data,
+        options: Options
+    ) throws -> T {
         let decoder = Foundation.JSONDecoder()
-        decoder.dataDecodingStrategy = dataDecodingStrategy
-        decoder.dateDecodingStrategy = dateDecodingStrategy
-        decoder.keyDecodingStrategy = keyDecodingStrategy
-        decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
-        decoder.userInfo = userInfo
+        configure(decoder, with: options)
+        return try decoder.decode(type, from: data)
+    }
+
+    private func configure(_ decoder: Foundation.JSONDecoder, with options: Options) {
+        decoder.dataDecodingStrategy = options.dataDecodingStrategy
+        decoder.dateDecodingStrategy = options.dateDecodingStrategy
+        decoder.keyDecodingStrategy = options.keyDecodingStrategy
+        decoder.nonConformingFloatDecodingStrategy = options.nonConformingFloatDecodingStrategy
+        decoder.userInfo = options.userInfo
         #if !os(Linux)
         if #available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, visionOS 1, *) {
-            decoder.allowsJSON5 = allowsJSON5
+            decoder.allowsJSON5 = options.json5
         }
         #endif
-        return try decoder.decode(type, from: data)
     }
     
     #if !os(Linux)
@@ -308,15 +348,11 @@ open class ReerJSONDecoder {
     func decodeWithFoundationDecoder<T : DecodableWithConfiguration>(
         _ type: T.Type,
         from data: Data,
+        options: Options,
         configuration: T.DecodingConfiguration
     ) throws -> T {
         let decoder = Foundation.JSONDecoder()
-        decoder.dataDecodingStrategy = dataDecodingStrategy
-        decoder.dateDecodingStrategy = dateDecodingStrategy
-        decoder.keyDecodingStrategy = keyDecodingStrategy
-        decoder.nonConformingFloatDecodingStrategy = nonConformingFloatDecodingStrategy
-        decoder.userInfo = userInfo
-        decoder.allowsJSON5 = allowsJSON5
+        configure(decoder, with: options)
         return try decoder.decode(type, from: data, configuration: configuration)
     }
     #endif

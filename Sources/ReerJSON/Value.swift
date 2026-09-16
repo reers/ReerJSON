@@ -105,12 +105,120 @@ internal final class Document: @unchecked Sendable {
         self.doc = doc
     }
 
+    /// Result of a streaming parse attempt.
+    enum StreamParseResult {
+        case success(Document, consumedBytes: Int)
+        case needMoreData
+    }
+
+    /// Attempts to parse one JSON value from bytes with `STOP_WHEN_DONE`.
+    ///
+    /// The bytes do not need to be padded; for non-INSITU parsing yyjson
+    /// allocates and pads its own internal buffer.
+    ///
+    /// - Parameters:
+    ///   - bytes: Pointer to the JSON bytes.
+    ///   - count: Number of valid bytes.
+    ///   - options: Options for reading the JSON.
+    /// - Returns: `.success` with consumed byte count, or `.needMoreData` if incomplete.
+    /// - Throws: `JSONError` for non-recoverable parse errors.
+    static func streamParse(
+        bytes: UnsafePointer<UInt8>, count: Int,
+        options: JSONReadOptions
+    ) throws -> StreamParseResult {
+        guard count > 0 else { return .needMoreData }
+
+        var error = yyjson_read_err()
+        var flags = options.yyjsonFlags
+        flags |= YYJSON_READ_STOP_WHEN_DONE
+        flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
+
+        let ptr = UnsafeMutablePointer(
+            mutating: UnsafeRawPointer(bytes).assumingMemoryBound(to: CChar.self)
+        )
+        let result = yyjson_read_opts(ptr, count, flags, nil, &error)
+
+        if let doc = result {
+            let consumed = yyjson_doc_get_read_size(doc)
+            return .success(Document(alreadyParsed: doc), consumedBytes: consumed)
+        }
+
+        if error.code == YYJSON_READ_ERROR_UNEXPECTED_END
+            || error.code == YYJSON_READ_ERROR_EMPTY_CONTENT {
+            return .needMoreData
+        }
+
+        throw JSONError(parsing: error)
+    }
+
+    /// Adopts an already-parsed yyjson_doc, taking ownership.
+    init(alreadyParsed doc: UnsafeMutablePointer<yyjson_doc>) {
+        self.doc = doc
+        self.retainedData = nil
+    }
+
     deinit {
         yyjson_doc_free(doc)
     }
 
     var root: UnsafeMutablePointer<yyjson_val>? {
         yyjson_doc_get_root(doc)
+    }
+}
+
+// MARK: - IncrementalParser (Internal)
+
+/// Internal accumulator used by ``JSONIncrementalReader``.
+///
+/// We can't use yyjson's `yyjson_incr_*` API directly here because:
+/// - Non-INSITU `yyjson_incr_new` takes a snapshot of the input buffer at the
+///   time of the call (it `memcpy`s `buf_len` bytes into its own storage), so
+///   later appends to our buffer are invisible to it; calling `yyjson_incr_read`
+///   with a larger `len` fails with `INVALID_PARAMETER`.
+/// - INSITU mode requires a stable, pre-sized buffer and modifies the input
+///   in place for string unescaping; growing the buffer invalidates the state
+///   and the in-place modifications make restart-from-scratch fragile.
+///
+/// Instead we keep the data in a growable `Data` buffer and try a fresh
+/// `STOP_WHEN_DONE` parse on each `read()`. This is `O(N²)` worst-case across
+/// many small chunks, but is correct in all cases and is `O(N)` total when
+/// data arrives in a small number of large chunks (the common case for
+/// network streaming).
+internal final class IncrementalParser {
+    private var buffer: Data
+    private let options: JSONReadOptions
+
+    var count: Int { buffer.count }
+
+    init(initialData: Data, options: JSONReadOptions) {
+        self.buffer = initialData
+        self.options = options
+    }
+
+    func append(_ data: Data) {
+        guard !data.isEmpty else { return }
+        buffer.append(data)
+    }
+
+    /// Result of an incremental read.
+    enum ReadResult {
+        case success(Document)
+        case needMoreData
+    }
+
+    func read() throws -> ReadResult {
+        guard !buffer.isEmpty else { return .needMoreData }
+
+        do {
+            let doc = try Document(data: buffer, options: options)
+            return .success(doc)
+        } catch let error as JSONError {
+            if error.readErrorCode == UInt32(YYJSON_READ_ERROR_UNEXPECTED_END)
+                || error.readErrorCode == UInt32(YYJSON_READ_ERROR_EMPTY_CONTENT) {
+                return .needMoreData
+            }
+            throw error
+        }
     }
 }
 
@@ -148,6 +256,11 @@ internal final class Document: @unchecked Sendable {
 /// ```
 public struct JSONDocument: ~Copyable, @unchecked Sendable {
     internal let _document: Document
+
+    /// Creates a document from a pre-parsed internal document.
+    internal init(_document: Document) {
+        self._document = _document
+    }
 
     /// Creates a document by parsing JSON data.
     ///

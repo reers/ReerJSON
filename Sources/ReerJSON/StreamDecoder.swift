@@ -21,15 +21,21 @@
 
 import Foundation
 
+private extension JSONReadOptions {
+    var codableStreamingOptions: JSONReadOptions {
+        union(.numberAsRaw)
+    }
+}
+
 // MARK: - StreamingJSONLinesDecoder
 
 /// A streaming decoder for JSON Lines (NDJSON) format.
 ///
 /// Each top-level JSON value in the stream is decoded into `T`.
 ///
-/// Internally this passes raw byte slices from the underlying
-/// ``JSONStreamParser`` straight to ``ReerJSONDecoder/decode(_:from:)``,
-/// avoiding any intermediate `JSONValue` serialization round-trip.
+/// Internally this decodes values already parsed by the underlying
+/// ``JSONStreamParser``, avoiding an intermediate serialization and reparse
+/// round-trip.
 ///
 /// ```swift
 /// var decoder = StreamingJSONLinesDecoder(Item.self)
@@ -56,20 +62,24 @@ public struct StreamingJSONLinesDecoder<T: Decodable & Sendable>: @unchecked Sen
         decoder: ReerJSONDecoder? = nil
     ) {
         self.type = type
-        self.parser = JSONStreamParser(mode: .jsonLines, options: options)
+        self.parser = JSONStreamParser(mode: .jsonLines, options: options.codableStreamingOptions)
         self.decoder = decoder ?? ReerJSONDecoder()
     }
 
     /// Feeds data to the decoder and returns all decoded values.
     public mutating func parseBuffer(_ data: Data) throws -> [T] {
-        let slices = try parser.parseSlices(data)
-        return try decodeAll(slices)
+        let values = try parser.parse(data)
+        return try values.map { value in
+            try decoder.decodeParsedValue(type, from: value)
+        }
     }
 
     /// Signals end-of-stream and returns any remaining decoded values.
     public mutating func finalize() throws -> [T] {
-        let slices = try parser.finalizeSlices()
-        return try decodeAll(slices)
+        let values = try parser.finalize()
+        return try values.map { value in
+            try decoder.decodeParsedValue(type, from: value)
+        }
     }
 
     /// Resets the decoder to its initial state.
@@ -77,14 +87,6 @@ public struct StreamingJSONLinesDecoder<T: Decodable & Sendable>: @unchecked Sen
         parser.reset()
     }
 
-    private func decodeAll(_ slices: [Data]) throws -> [T] {
-        var out: [T] = []
-        out.reserveCapacity(slices.count)
-        for slice in slices {
-            out.append(try decoder.decode(type, from: slice))
-        }
-        return out
-    }
 }
 
 // MARK: - StreamingJSONArrayDecoder
@@ -112,32 +114,28 @@ public struct StreamingJSONArrayDecoder<T: Decodable & Sendable>: @unchecked Sen
         decoder: ReerJSONDecoder? = nil
     ) {
         self.type = type
-        self.parser = JSONStreamParser(mode: .jsonArray, options: options)
+        self.parser = JSONStreamParser(mode: .jsonArray, options: options.codableStreamingOptions)
         self.decoder = decoder ?? ReerJSONDecoder()
     }
 
     public mutating func parseBuffer(_ data: Data) throws -> [T] {
-        let slices = try parser.parseSlices(data)
-        return try decodeAll(slices)
+        let values = try parser.parse(data)
+        return try values.map { value in
+            try decoder.decodeParsedValue(type, from: value)
+        }
     }
 
     public mutating func finalize() throws -> [T] {
-        let slices = try parser.finalizeSlices()
-        return try decodeAll(slices)
+        let values = try parser.finalize()
+        return try values.map { value in
+            try decoder.decodeParsedValue(type, from: value)
+        }
     }
 
     public mutating func reset() {
         parser.reset()
     }
 
-    private func decodeAll(_ slices: [Data]) throws -> [T] {
-        var out: [T] = []
-        out.reserveCapacity(slices.count)
-        for slice in slices {
-            out.append(try decoder.decode(type, from: slice))
-        }
-        return out
-    }
 }
 
 // MARK: - AsyncSequence Adapters
@@ -299,9 +297,8 @@ where Source.Element == UInt8 {
 
 /// An `AsyncSequence` that decodes JSON values directly into `Decodable` types.
 ///
-/// Internally this passes raw byte slices to ``ReerJSONDecoder``, skipping the
-/// intermediate `JSONValue` allocation and serialization that
-/// ``JSONValueStream`` performs.
+/// Internally this decodes values already parsed by ``JSONStreamParser``,
+/// skipping the serialization and reparse round-trip.
 @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 public struct DecodingStream<T: Decodable & Sendable, Source: AsyncSequence & Sendable>:
     AsyncSequence, @unchecked Sendable
@@ -337,7 +334,7 @@ where Source.Element == Data {
             decoder: ReerJSONDecoder, type: T.Type
         ) {
             self.sourceIterator = source
-            self.parser = JSONStreamParser(mode: mode, options: options)
+            self.parser = JSONStreamParser(mode: mode, options: options.codableStreamingOptions)
             self.decoder = decoder
             self.type = type
         }
@@ -360,30 +357,25 @@ where Source.Element == Data {
 
                 guard let chunk = try await sourceIterator.next() else {
                     sourceExhausted = true
-                    let slices = try parser.finalizeSlices()
-                    if !slices.isEmpty {
-                        pending = try decodeAll(slices)
+                    let remaining = try parser.finalize()
+                    if !remaining.isEmpty {
+                        pending = try remaining.map { value in
+                            try decoder.decodeParsedValue(type, from: value)
+                        }
                         pendingIndex = 0
                         continue
                     }
                     return nil
                 }
 
-                let slices = try parser.parseSlices(chunk)
-                if !slices.isEmpty {
-                    pending = try decodeAll(slices)
+                let values = try parser.parse(chunk)
+                if !values.isEmpty {
+                    pending = try values.map { value in
+                        try decoder.decodeParsedValue(type, from: value)
+                    }
                     pendingIndex = 0
                 }
             }
-        }
-
-        private func decodeAll(_ slices: [Data]) throws -> [T] {
-            var out: [T] = []
-            out.reserveCapacity(slices.count)
-            for slice in slices {
-                out.append(try decoder.decode(type, from: slice))
-            }
-            return out
         }
     }
 }

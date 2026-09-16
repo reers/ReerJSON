@@ -213,6 +213,17 @@ open class ReerJSONDecoder {
         let impl = JSONDecoderImpl(json: json, userInfo: userInfo, codingPathNode: .root, options: options)
         return try impl.unbox(json, as: type, for: .root, _CodingKey?.none)
     }
+
+    func decodeParsedValue<T: Decodable>(_ type: T.Type, from value: JSONValue, path: [String] = []) throws -> T {
+        var pointer = value.rawValue
+        for key in path {
+            pointer = key.withCString { yyjson_obj_get(pointer, $0) }
+        }
+
+        let json = JSON(pointer: pointer)
+        let impl = JSONDecoderImpl(json: json, userInfo: userInfo, codingPathNode: .root, options: options)
+        return try impl.unbox(json, as: type, for: .root, _CodingKey?.none)
+    }
     
     /// Decodes a top-level value of the given type from the given JSON representation.
     ///

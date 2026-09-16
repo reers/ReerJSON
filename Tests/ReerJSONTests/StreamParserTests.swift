@@ -29,6 +29,19 @@ private struct Item: Codable, Equatable, Sendable {
     let name: String
 }
 
+private struct DecimalItem: Codable, Equatable, Sendable {
+    let amount: Decimal
+}
+
+private final class FailingDataDecodeDecoder: ReerJSONDecoder {
+    private(set) var dataDecodeCallCount = 0
+
+    override func decode<T: Decodable>(_ type: T.Type, from data: Data, path: [String] = []) throws -> T {
+        dataDecodeCallCount += 1
+        throw JSONError.invalidJSON("Streaming decoder should not reparse serialized Data")
+    }
+}
+
 // MARK: - JSON Lines Tests
 
 final class JSONStreamParserJSONLinesTests: XCTestCase {
@@ -561,6 +574,28 @@ final class StreamingDecoderTests: XCTestCase {
         decoder.reset()
         let items = try decoder.parseBuffer(Data("{\"id\":2,\"name\":\"b\"}\n".utf8))
         XCTAssertEqual(items, [Item(id: 2, name: "b")])
+    }
+
+    func testJSONLinesDecoderDoesNotReparseSerializedData() throws {
+        let dataDecoder = FailingDataDecodeDecoder()
+        var decoder = StreamingJSONLinesDecoder(Item.self, decoder: dataDecoder)
+        let data = Data("{\"id\":1,\"name\":\"a\"}\n".utf8)
+
+        let items = try decoder.parseBuffer(data)
+
+        XCTAssertEqual(items, [Item(id: 1, name: "a")])
+        XCTAssertEqual(dataDecoder.dataDecodeCallCount, 0)
+    }
+
+    func testJSONLinesDecoderPreservesDecimalWithoutReparsingSerializedData() throws {
+        let dataDecoder = FailingDataDecodeDecoder()
+        var decoder = StreamingJSONLinesDecoder(DecimalItem.self, decoder: dataDecoder)
+        let data = Data("{\"amount\":1234567890.123456789}\n".utf8)
+
+        let items = try decoder.parseBuffer(data)
+
+        XCTAssertEqual(items, [DecimalItem(amount: Decimal(string: "1234567890.123456789")!)])
+        XCTAssertEqual(dataDecoder.dataDecodeCallCount, 0)
     }
 }
 

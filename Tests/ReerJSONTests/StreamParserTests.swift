@@ -731,4 +731,46 @@ final class AsyncStreamTests: XCTestCase {
 
         XCTAssertEqual(items, [SnakeCaseItem(fullName: "Alice")])
     }
+
+    func testByteChunkBufferReusesStorageAcrossReads() async throws {
+        let bytes = Array("abcdef".utf8)
+        var index = 0
+        var buffer = ByteChunkBuffer(capacity: 4)
+
+        let first = await buffer.readChunk {
+            guard index < bytes.count else { return nil }
+            defer { index += 1 }
+            return bytes[index]
+        }
+
+        XCTAssertEqual(first.data, Data("abcd".utf8))
+        XCTAssertFalse(first.reachedEnd)
+        XCTAssertEqual(buffer.capacity, 4)
+
+        let second = await buffer.readChunk {
+            guard index < bytes.count else { return nil }
+            defer { index += 1 }
+            return bytes[index]
+        }
+
+        XCTAssertEqual(second.data, Data("ef".utf8))
+        XCTAssertTrue(second.reachedEnd)
+        XCTAssertEqual(buffer.capacity, 4)
+    }
+
+    func testByteChunkBufferTreatsNonPositiveCapacityAsOne() async throws {
+        let bytes = Array("ab".utf8)
+        var index = 0
+        var buffer = ByteChunkBuffer(capacity: 0)
+
+        let first = await buffer.readChunk {
+            guard index < bytes.count else { return nil }
+            defer { index += 1 }
+            return bytes[index]
+        }
+
+        XCTAssertEqual(first.data, Data("a".utf8))
+        XCTAssertFalse(first.reachedEnd)
+        XCTAssertEqual(buffer.capacity, 1)
+    }
 }

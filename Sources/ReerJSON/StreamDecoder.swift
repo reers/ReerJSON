@@ -140,6 +140,40 @@ public struct StreamingJSONArrayDecoder<T: Decodable & Sendable>: Sendable {
 
 // MARK: - AsyncSequence Adapters
 
+struct ByteChunkBuffer: Sendable {
+    private var storage: [UInt8]
+
+    var capacity: Int {
+        storage.count
+    }
+
+    init(capacity: Int) {
+        self.storage = Array(repeating: 0, count: max(1, capacity))
+    }
+
+    mutating func readChunk(
+        nextByte: () async throws -> UInt8?
+    ) async rethrows -> (data: Data, reachedEnd: Bool) {
+        var count = 0
+        while count < storage.count {
+            guard let byte = try await nextByte() else {
+                return (data(forByteCount: count), true)
+            }
+            storage[count] = byte
+            count += 1
+        }
+        return (data(forByteCount: count), false)
+    }
+
+    private func data(forByteCount count: Int) -> Data {
+        guard count > 0 else { return Data() }
+        return storage.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return Data() }
+            return Data(bytes: baseAddress, count: count)
+        }
+    }
+}
+
 /// An `AsyncSequence` that yields ``JSONValue`` items from chunks of `Data`.
 @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 public struct JSONValueStream<Source: AsyncSequence & Sendable>: AsyncSequence, Sendable
@@ -228,7 +262,7 @@ where Source.Element == UInt8 {
         var pending: [JSONValue] = []
         var pendingIndex: Int = 0
         var sourceExhausted = false
-        let chunkSize: Int
+        var chunkBuffer: ByteChunkBuffer
 
         init(
             source: Source.AsyncIterator,
@@ -237,7 +271,7 @@ where Source.Element == UInt8 {
         ) {
             self.sourceIterator = source
             self.parser = JSONStreamParser(mode: mode, options: options)
-            self.chunkSize = chunkSize
+            self.chunkBuffer = ByteChunkBuffer(capacity: chunkSize)
         }
 
         public mutating func next() async throws -> JSONValue? {
@@ -278,19 +312,14 @@ where Source.Element == UInt8 {
             }
         }
 
-        /// Reads up to `chunkSize` bytes from the byte source into a
-        /// pre-allocated buffer to avoid byte-at-a-time `Data.append`.
+        /// Reads up to `chunkSize` bytes into reusable storage before
+        /// constructing the `Data` chunk for parsing.
         private mutating func readChunk() async throws -> Data {
-            var scratch = [UInt8]()
-            scratch.reserveCapacity(chunkSize)
-            for _ in 0..<chunkSize {
-                guard let byte = try await sourceIterator.next() else {
-                    sourceExhausted = true
-                    break
-                }
-                scratch.append(byte)
+            let chunk = try await chunkBuffer.readChunk {
+                try await sourceIterator.next()
             }
-            return scratch.isEmpty ? Data() : Data(scratch)
+            sourceExhausted = chunk.reachedEnd
+            return chunk.data
         }
     }
 }

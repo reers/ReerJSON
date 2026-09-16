@@ -43,10 +43,10 @@ private extension JSONReadOptions {
 /// let items2 = try decoder.parseBuffer(chunk2)
 /// let remaining = try decoder.finalize()
 /// ```
-public struct StreamingJSONLinesDecoder<T: Decodable & Sendable>: @unchecked Sendable {
+public struct StreamingJSONLinesDecoder<T: Decodable & Sendable>: Sendable {
 
     private var parser: JSONStreamParser
-    private let decoder: ReerJSONDecoder
+    private let decoderOptions: ReerJSONDecoder.Options
     private let type: T.Type
 
     /// Creates a new JSON Lines streaming decoder.
@@ -63,14 +63,14 @@ public struct StreamingJSONLinesDecoder<T: Decodable & Sendable>: @unchecked Sen
     ) {
         self.type = type
         self.parser = JSONStreamParser(mode: .jsonLines, options: options.codableStreamingOptions)
-        self.decoder = decoder ?? ReerJSONDecoder()
+        self.decoderOptions = decoder?.optionsSnapshot() ?? ReerJSONDecoder.Options()
     }
 
     /// Feeds data to the decoder and returns all decoded values.
     public mutating func parseBuffer(_ data: Data) throws -> [T] {
         let values = try parser.parse(data)
         return try values.map { value in
-            try decoder.decodeParsedValue(type, from: value)
+            try ReerJSONDecoder.decodeParsedValue(type, from: value, options: decoderOptions)
         }
     }
 
@@ -78,7 +78,7 @@ public struct StreamingJSONLinesDecoder<T: Decodable & Sendable>: @unchecked Sen
     public mutating func finalize() throws -> [T] {
         let values = try parser.finalize()
         return try values.map { value in
-            try decoder.decodeParsedValue(type, from: value)
+            try ReerJSONDecoder.decodeParsedValue(type, from: value, options: decoderOptions)
         }
     }
 
@@ -102,10 +102,10 @@ public struct StreamingJSONLinesDecoder<T: Decodable & Sendable>: @unchecked Sen
 /// let items2 = try decoder.parseBuffer(chunk2)
 /// let remaining = try decoder.finalize()
 /// ```
-public struct StreamingJSONArrayDecoder<T: Decodable & Sendable>: @unchecked Sendable {
+public struct StreamingJSONArrayDecoder<T: Decodable & Sendable>: Sendable {
 
     private var parser: JSONStreamParser
-    private let decoder: ReerJSONDecoder
+    private let decoderOptions: ReerJSONDecoder.Options
     private let type: T.Type
 
     public init(
@@ -115,20 +115,20 @@ public struct StreamingJSONArrayDecoder<T: Decodable & Sendable>: @unchecked Sen
     ) {
         self.type = type
         self.parser = JSONStreamParser(mode: .jsonArray, options: options.codableStreamingOptions)
-        self.decoder = decoder ?? ReerJSONDecoder()
+        self.decoderOptions = decoder?.optionsSnapshot() ?? ReerJSONDecoder.Options()
     }
 
     public mutating func parseBuffer(_ data: Data) throws -> [T] {
         let values = try parser.parse(data)
         return try values.map { value in
-            try decoder.decodeParsedValue(type, from: value)
+            try ReerJSONDecoder.decodeParsedValue(type, from: value, options: decoderOptions)
         }
     }
 
     public mutating func finalize() throws -> [T] {
         let values = try parser.finalize()
         return try values.map { value in
-            try decoder.decodeParsedValue(type, from: value)
+            try ReerJSONDecoder.decodeParsedValue(type, from: value, options: decoderOptions)
         }
     }
 
@@ -301,21 +301,21 @@ where Source.Element == UInt8 {
 /// skipping the serialization and reparse round-trip.
 @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 public struct DecodingStream<T: Decodable & Sendable, Source: AsyncSequence & Sendable>:
-    AsyncSequence, @unchecked Sendable
+    AsyncSequence, Sendable
 where Source.Element == Data {
     public typealias Element = T
 
     let source: Source
     let mode: JSONStreamMode
     let options: JSONReadOptions
-    let decoder: ReerJSONDecoder
+    let decoderOptions: ReerJSONDecoder.Options
     let type: T.Type
 
     public func makeAsyncIterator() -> Iterator {
         Iterator(
             source: source.makeAsyncIterator(),
             mode: mode, options: options,
-            decoder: decoder, type: type
+            decoderOptions: decoderOptions, type: type
         )
     }
 
@@ -325,17 +325,17 @@ where Source.Element == Data {
         var pending: [T] = []
         var pendingIndex: Int = 0
         var sourceExhausted = false
-        let decoder: ReerJSONDecoder
+        let decoderOptions: ReerJSONDecoder.Options
         let type: T.Type
 
         init(
             source: Source.AsyncIterator,
             mode: JSONStreamMode, options: JSONReadOptions,
-            decoder: ReerJSONDecoder, type: T.Type
+            decoderOptions: ReerJSONDecoder.Options, type: T.Type
         ) {
             self.sourceIterator = source
             self.parser = JSONStreamParser(mode: mode, options: options.codableStreamingOptions)
-            self.decoder = decoder
+            self.decoderOptions = decoderOptions
             self.type = type
         }
 
@@ -360,7 +360,7 @@ where Source.Element == Data {
                     let remaining = try parser.finalize()
                     if !remaining.isEmpty {
                         pending = try remaining.map { value in
-                            try decoder.decodeParsedValue(type, from: value)
+                            try ReerJSONDecoder.decodeParsedValue(type, from: value, options: decoderOptions)
                         }
                         pendingIndex = 0
                         continue
@@ -371,7 +371,7 @@ where Source.Element == Data {
                 let values = try parser.parse(chunk)
                 if !values.isEmpty {
                     pending = try values.map { value in
-                        try decoder.decodeParsedValue(type, from: value)
+                        try ReerJSONDecoder.decodeParsedValue(type, from: value, options: decoderOptions)
                     }
                     pendingIndex = 0
                 }
@@ -414,7 +414,7 @@ extension AsyncSequence where Element == Data, Self: Sendable {
         DecodingStream(
             source: self,
             mode: mode, options: options,
-            decoder: decoder ?? ReerJSONDecoder(),
+            decoderOptions: decoder?.optionsSnapshot() ?? ReerJSONDecoder.Options(),
             type: type
         )
     }

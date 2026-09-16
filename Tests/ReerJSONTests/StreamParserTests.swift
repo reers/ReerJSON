@@ -33,6 +33,10 @@ private struct DecimalItem: Codable, Equatable, Sendable {
     let amount: Decimal
 }
 
+private struct SnakeCaseItem: Codable, Equatable, Sendable {
+    let fullName: String
+}
+
 private final class FailingDataDecodeDecoder: ReerJSONDecoder {
     private(set) var dataDecodeCallCount = 0
 
@@ -597,6 +601,18 @@ final class StreamingDecoderTests: XCTestCase {
         XCTAssertEqual(items, [DecimalItem(amount: Decimal(string: "1234567890.123456789")!)])
         XCTAssertEqual(dataDecoder.dataDecodeCallCount, 0)
     }
+
+    func testJSONLinesDecoderUsesDecoderConfigurationSnapshot() throws {
+        let baseDecoder = ReerJSONDecoder()
+        baseDecoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        var decoder = StreamingJSONLinesDecoder(SnakeCaseItem.self, decoder: baseDecoder)
+        baseDecoder.keyDecodingStrategy = .useDefaultKeys
+
+        let items = try decoder.parseBuffer(Data("{\"full_name\":\"Alice\"}\n".utf8))
+
+        XCTAssertEqual(items, [SnakeCaseItem(fullName: "Alice")])
+    }
 }
 
 // MARK: - AsyncSequence Tests
@@ -693,5 +709,26 @@ final class AsyncStreamTests: XCTestCase {
             count += 1
         }
         XCTAssertEqual(count, 0)
+    }
+
+    func testDecodingStreamUsesDecoderConfigurationSnapshot() async throws {
+        let baseDecoder = ReerJSONDecoder()
+        baseDecoder.keyDecodingStrategy = .convertFromSnakeCase
+        let chunks = [Data("{\"full_name\":\"Alice\"}\n".utf8)]
+        let stream = AsyncStream<Data> { continuation in
+            for chunk in chunks {
+                continuation.yield(chunk)
+            }
+            continuation.finish()
+        }.decode(SnakeCaseItem.self, mode: .jsonLines, decoder: baseDecoder)
+
+        baseDecoder.keyDecodingStrategy = .useDefaultKeys
+
+        var items: [SnakeCaseItem] = []
+        for try await item in stream {
+            items.append(item)
+        }
+
+        XCTAssertEqual(items, [SnakeCaseItem(fullName: "Alice")])
     }
 }

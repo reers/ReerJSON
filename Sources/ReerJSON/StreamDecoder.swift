@@ -140,6 +140,33 @@ public struct StreamingJSONArrayDecoder<T: Decodable & Sendable>: Sendable {
 
 // MARK: - AsyncSequence Adapters
 
+struct PendingQueue<Element: Sendable>: Sendable {
+    private var elements: [Element] = []
+    private var index = 0
+
+    var capacity: Int {
+        elements.capacity
+    }
+
+    @inline(__always)
+    mutating func popFirst() -> Element? {
+        guard index < elements.count else { return nil }
+        let element = elements[index]
+        index += 1
+        if index >= elements.count {
+            elements.removeAll(keepingCapacity: true)
+            index = 0
+        }
+        return element
+    }
+
+    @inline(__always)
+    mutating func replace(with newElements: [Element]) {
+        elements = newElements
+        index = 0
+    }
+}
+
 struct ByteChunkBuffer: Sendable {
     private var storage: [UInt8]
 
@@ -191,8 +218,7 @@ where Source.Element == Data {
     public struct Iterator: AsyncIteratorProtocol {
         var sourceIterator: Source.AsyncIterator
         var parser: JSONStreamParser
-        var pending: [JSONValue] = []
-        var pendingIndex: Int = 0
+        var pending = PendingQueue<JSONValue>()
         var sourceExhausted = false
 
         init(source: Source.AsyncIterator, mode: JSONStreamMode, options: JSONReadOptions) {
@@ -202,13 +228,7 @@ where Source.Element == Data {
 
         public mutating func next() async throws -> JSONValue? {
             while true {
-                if pendingIndex < pending.count {
-                    let value = pending[pendingIndex]
-                    pendingIndex += 1
-                    if pendingIndex >= pending.count {
-                        pending.removeAll(keepingCapacity: true)
-                        pendingIndex = 0
-                    }
+                if let value = pending.popFirst() {
                     return value
                 }
 
@@ -220,8 +240,7 @@ where Source.Element == Data {
                     sourceExhausted = true
                     let remaining = try parser.finalize()
                     if !remaining.isEmpty {
-                        pending = remaining
-                        pendingIndex = 0
+                        pending.replace(with: remaining)
                         continue
                     }
                     return nil
@@ -229,8 +248,7 @@ where Source.Element == Data {
 
                 let values = try parser.parse(chunk)
                 if !values.isEmpty {
-                    pending = values
-                    pendingIndex = 0
+                    pending.replace(with: values)
                 }
             }
         }
@@ -259,8 +277,7 @@ where Source.Element == UInt8 {
     public struct Iterator: AsyncIteratorProtocol {
         var sourceIterator: Source.AsyncIterator
         var parser: JSONStreamParser
-        var pending: [JSONValue] = []
-        var pendingIndex: Int = 0
+        var pending = PendingQueue<JSONValue>()
         var sourceExhausted = false
         var chunkBuffer: ByteChunkBuffer
 
@@ -276,13 +293,7 @@ where Source.Element == UInt8 {
 
         public mutating func next() async throws -> JSONValue? {
             while true {
-                if pendingIndex < pending.count {
-                    let value = pending[pendingIndex]
-                    pendingIndex += 1
-                    if pendingIndex >= pending.count {
-                        pending.removeAll(keepingCapacity: true)
-                        pendingIndex = 0
-                    }
+                if let value = pending.popFirst() {
                     return value
                 }
 
@@ -294,8 +305,7 @@ where Source.Element == UInt8 {
                 if !chunk.isEmpty {
                     let values = try parser.parse(chunk)
                     if !values.isEmpty {
-                        pending = values
-                        pendingIndex = 0
+                        pending.replace(with: values)
                         continue
                     }
                 }
@@ -303,8 +313,7 @@ where Source.Element == UInt8 {
                 if sourceExhausted {
                     let remaining = try parser.finalize()
                     if !remaining.isEmpty {
-                        pending = remaining
-                        pendingIndex = 0
+                        pending.replace(with: remaining)
                         continue
                     }
                     return nil
@@ -351,8 +360,7 @@ where Source.Element == Data {
     public struct Iterator: AsyncIteratorProtocol {
         var sourceIterator: Source.AsyncIterator
         var parser: JSONStreamParser
-        var pending: [T] = []
-        var pendingIndex: Int = 0
+        var pending = PendingQueue<T>()
         var sourceExhausted = false
         let decoderOptions: ReerJSONDecoder.Options
         let type: T.Type
@@ -370,13 +378,7 @@ where Source.Element == Data {
 
         public mutating func next() async throws -> T? {
             while true {
-                if pendingIndex < pending.count {
-                    let value = pending[pendingIndex]
-                    pendingIndex += 1
-                    if pendingIndex >= pending.count {
-                        pending.removeAll(keepingCapacity: true)
-                        pendingIndex = 0
-                    }
+                if let value = pending.popFirst() {
                     return value
                 }
 
@@ -388,10 +390,10 @@ where Source.Element == Data {
                     sourceExhausted = true
                     let remaining = try parser.finalize()
                     if !remaining.isEmpty {
-                        pending = try remaining.map { value in
+                        let decoded = try remaining.map { value in
                             try ReerJSONDecoder.decodeParsedValue(type, from: value, options: decoderOptions)
                         }
-                        pendingIndex = 0
+                        pending.replace(with: decoded)
                         continue
                     }
                     return nil
@@ -399,10 +401,10 @@ where Source.Element == Data {
 
                 let values = try parser.parse(chunk)
                 if !values.isEmpty {
-                    pending = try values.map { value in
+                    let decoded = try values.map { value in
                         try ReerJSONDecoder.decodeParsedValue(type, from: value, options: decoderOptions)
                     }
-                    pendingIndex = 0
+                    pending.replace(with: decoded)
                 }
             }
         }

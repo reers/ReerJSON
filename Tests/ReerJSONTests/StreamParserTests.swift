@@ -773,4 +773,24 @@ final class AsyncStreamTests: XCTestCase {
         XCTAssertFalse(first.reachedEnd)
         XCTAssertEqual(buffer.capacity, 1)
     }
+
+    func testPendingQueueYieldsValuesInOrderAndRetainsStorage() {
+        var queue = PendingQueue<Int>()
+
+        XCTAssertNil(queue.popFirst())
+
+        queue.replace(with: [1, 2, 3])
+        let capacity = queue.capacity
+
+        XCTAssertGreaterThanOrEqual(capacity, 3)
+        XCTAssertEqual(queue.popFirst(), 1)
+        XCTAssertEqual(queue.popFirst(), 2)
+        XCTAssertEqual(queue.popFirst(), 3)
+        XCTAssertNil(queue.popFirst())
+        XCTAssertGreaterThanOrEqual(queue.capacity, capacity)
+
+        queue.replace(with: [4])
+        XCTAssertEqual(queue.popFirst(), 4)
+        XCTAssertNil(queue.popFirst())
+    }
 }

@@ -51,7 +51,7 @@ Tested with ReerJSON 1.0.0, ZippyJSON 1.2.15, IkigaJSON 2.3.2
 
 Add dependency in `Package.swift` or project `Package Dependencies`
 ```swift
-.package(url: "https://github.com/reers/ReerJSON.git", from: "1.0.0"),
+.package(url: "https://github.com/reers/ReerJSON.git", from: "1.1.0"),
 ```
 
 Depend on `ReerJSON` in your target.
@@ -115,6 +115,62 @@ The `inout` parameter makes it clear that the data is consumed by this operation
 > For most use cases, the standard `YYJSONValue(data:)` initializer is sufficient.
 > Use in-place parsing only when performance is critical
 > and you can accept the ownership semantics.
+
+## Streaming
+
+Parse large or incremental JSON inputs without waiting for the complete payload.
+Streaming supports both newline-delimited JSON values and a single top-level JSON array.
+
+Use `JSONStreamParser` when you want DOM-style `JSONValue` results:
+
+```swift
+import Foundation
+import ReerJSON
+
+var parser = JSONStreamParser(mode: .jsonLines)
+
+let firstChunk = Data("{\"id\":1}\n".utf8)
+let secondChunk = Data("{\"id\":2}\n".utf8)
+
+let firstValues = try parser.parse(firstChunk)
+let secondValues = try parser.parse(secondChunk)
+let remainingValues = try parser.finalize()
+```
+
+Use `StreamingJSONLinesDecoder` or `StreamingJSONArrayDecoder` when each item
+should be decoded into a `Decodable` type as soon as it is complete:
+
+```swift
+import Foundation
+import ReerJSON
+
+struct Event: Decodable, Sendable {
+    let id: Int
+    let name: String
+}
+
+var decoder = StreamingJSONLinesDecoder(Event.self)
+
+let events = try decoder.parseBuffer(Data("{\"id\":1,\"name\":\"start\"}\n".utf8))
+let remainingEvents = try decoder.finalize()
+```
+
+For `AsyncSequence` sources, stream `Data` chunks directly into `JSONValue`
+or decoded models. `AsyncSequence<UInt8>` sources can also use `jsonValues`
+with an optional `chunkSize`.
+
+```swift
+for try await value in dataChunks.jsonValues(mode: .jsonLines) {
+    print(value)
+}
+
+for try await event in dataChunks.decode(Event.self, mode: .jsonLines) {
+    print(event)
+}
+```
+
+`AsyncSequence` adapters are available on macOS 10.15, iOS 13, tvOS 13,
+and watchOS 6 or newer.
 
 ## JSONSerialization Alternative
 

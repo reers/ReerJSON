@@ -324,6 +324,202 @@ public struct JSONDocument: ~Copyable, @unchecked Sendable {
     public var rootArray: JSONArray? {
         root?.array
     }
+
+    /// Accesses the root value as a non-copyable borrowed view.
+    ///
+    /// The borrowed view does not retain the underlying document, so traversing
+    /// through this API avoids ARC traffic from creating ``JSONValue`` wrappers.
+    public borrowing func withRootValue<R>(
+        _ body: (borrowing JSONBorrowedValue) throws -> R
+    ) throws -> R {
+        guard let root = _document.root else {
+            throw JSONError.invalidData("Document has no root value")
+        }
+        let value = JSONBorrowedValue(value: root)
+        return try body(value)
+    }
+}
+
+/// A move-only JSON document that uniquely owns its internal storage.
+///
+/// This Swift 6.4-only owner stores the parsed document in `UniqueBox`. Use
+/// ``withRootValue(_:)`` to traverse with borrowed views and avoid retaining an
+/// owner for every child value wrapper.
+@available(macOS 27.0, iOS 27.0, tvOS 27.0, watchOS 27.0, macCatalyst 27.0, visionOS 27.0, *)
+public struct JSONUniqueDocument: ~Copyable, @unchecked Sendable {
+    internal let _document: UniqueBox<Document>
+
+    public init(data: Data, options: JSONReadOptions = .default) throws {
+        self._document = UniqueBox(try Document(data: data, options: options))
+    }
+
+    public init(string: String, options: JSONReadOptions = .default) throws {
+        guard let data = string.data(using: .utf8) else {
+            throw JSONError.invalidJSON("Invalid UTF-8 string")
+        }
+        self._document = UniqueBox(try Document(data: data, options: options))
+    }
+
+    public init(parsingInPlace data: inout Data, options: JSONReadOptions = .default) throws {
+        self._document = UniqueBox(try Document(consuming: &data, options: options))
+    }
+
+    public borrowing func withRootValue<R>(
+        _ body: (borrowing JSONBorrowedValue) throws -> R
+    ) throws -> R {
+        guard let root = _document.value.root else {
+            throw JSONError.invalidData("Document has no root value")
+        }
+        let value = JSONBorrowedValue(value: root)
+        return try body(value)
+    }
+}
+
+// MARK: - Borrowed Value
+
+/// A non-copyable view of a JSON value borrowed from a ``JSONDocument``.
+///
+/// Use ``JSONDocument/withRootValue(_:)`` to create borrowed views. They avoid
+/// retaining the owning document while traversing a DOM tree.
+public struct JSONBorrowedValue: ~Copyable, @unchecked Sendable {
+    private let value: UnsafeMutablePointer<yyjson_val>?
+
+    internal init(value: UnsafeMutablePointer<yyjson_val>?) {
+        self.value = value
+    }
+
+    /// Whether this value is null.
+    public var isNull: Bool {
+        yyjson_is_null(value)
+    }
+
+    /// Get the string value, or nil if not a string.
+    public var string: String? {
+        guard let cString = yyjson_get_str(value) else { return nil }
+        return String(cString: cString)
+    }
+
+    /// Get the raw C string pointer, or nil if not a string.
+    public var cString: UnsafePointer<CChar>? {
+        yyjson_get_str(value)
+    }
+
+    /// The integer value as `Int64`, or `nil` if not stored as an integer.
+    public var int64: Int64? {
+        guard yyjson_is_int(value) else { return nil }
+        return yyjson_get_sint(value)
+    }
+
+    /// The number value as `Double`, or `nil` if not a number.
+    public var number: Double? {
+        guard yyjson_is_num(value) else { return nil }
+        return yyjson_get_num(value)
+    }
+
+    /// The Boolean value, or `nil` if not a Boolean.
+    public var bool: Bool? {
+        guard yyjson_is_bool(value) else { return nil }
+        return yyjson_get_bool(value)
+    }
+
+    /// Borrows this value as an object.
+    public borrowing func withObject<R>(
+        _ body: (borrowing JSONBorrowedObject) throws -> R
+    ) rethrows -> R? {
+        guard let value, yyjson_is_obj(value) else { return nil }
+        let object = JSONBorrowedObject(value: value)
+        return try body(object)
+    }
+
+    /// Borrows this value as an array.
+    public borrowing func withArray<R>(
+        _ body: (borrowing JSONBorrowedArray) throws -> R
+    ) rethrows -> R? {
+        guard let value, yyjson_is_arr(value) else { return nil }
+        let array = JSONBorrowedArray(value: value)
+        return try body(array)
+    }
+}
+
+/// A non-copyable borrowed view of a JSON object.
+public struct JSONBorrowedObject: ~Copyable, @unchecked Sendable {
+    private let value: UnsafeMutablePointer<yyjson_val>
+
+    internal init(value: UnsafeMutablePointer<yyjson_val>) {
+        self.value = value
+    }
+
+    /// The number of key-value pairs in the object.
+    public var count: Int {
+        Int(yyjson_get_len(value))
+    }
+
+    /// Whether the object has no key-value pairs.
+    public var isEmpty: Bool {
+        count == 0
+    }
+
+    /// Borrows a value by key.
+    public borrowing func withValue<R>(
+        forKey key: String,
+        _ body: (borrowing JSONBorrowedValue) throws -> R
+    ) rethrows -> R? {
+        guard let child = yyObjGet(value, key: key) else { return nil }
+        let borrowed = JSONBorrowedValue(value: child)
+        return try body(borrowed)
+    }
+
+    /// Borrows each key-value pair in storage order.
+    public borrowing func forEach(
+        _ body: (String, borrowing JSONBorrowedValue) throws -> Void
+    ) rethrows {
+        var iterator = yyjson_obj_iter_with(value)
+        while let keyValue = yyjson_obj_iter_next(&iterator) {
+            guard let keyString = yyjson_get_str(keyValue) else { continue }
+            let child = JSONBorrowedValue(value: yyjson_obj_iter_get_val(keyValue))
+            try body(String(cString: keyString), child)
+        }
+    }
+}
+
+/// A non-copyable borrowed view of a JSON array.
+public struct JSONBorrowedArray: ~Copyable, @unchecked Sendable {
+    private let value: UnsafeMutablePointer<yyjson_val>
+
+    internal init(value: UnsafeMutablePointer<yyjson_val>) {
+        self.value = value
+    }
+
+    /// The number of elements in the array.
+    public var count: Int {
+        Int(yyjson_get_len(value))
+    }
+
+    /// Whether the array has no elements.
+    public var isEmpty: Bool {
+        count == 0
+    }
+
+    /// Borrows an element by index.
+    public borrowing func withElement<R>(
+        at index: Int,
+        _ body: (borrowing JSONBorrowedValue) throws -> R
+    ) rethrows -> R? {
+        guard let child = yyjson_arr_get(value, index) else { return nil }
+        let borrowed = JSONBorrowedValue(value: child)
+        return try body(borrowed)
+    }
+
+    /// Borrows each element in order.
+    public borrowing func forEach(
+        _ body: (borrowing JSONBorrowedValue) throws -> Void
+    ) rethrows {
+        var iterator = yyjson_arr_iter_with(value)
+        while let child = yyjson_arr_iter_next(&iterator) {
+            let borrowed = JSONBorrowedValue(value: child)
+            try body(borrowed)
+        }
+    }
 }
 
 // MARK: - Value

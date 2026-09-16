@@ -884,6 +884,61 @@ class JSONDocumentRootTests: XCTestCase {
         XCTAssertNotNil(document.root)
         XCTAssertEqual(document.root?.bool, true)
     }
+
+    func testBorrowedRootObjectLookup() throws {
+        let document = try JSONDocument(string: #"{"name":"Alice","age":30}"#)
+
+        let name = try document.withRootValue { root in
+            root.withObject { object in
+                object.withValue(forKey: "name") { value in
+                    value.string ?? ""
+                } ?? ""
+            } ?? ""
+        }
+
+        let age = try document.withRootValue { root in
+            root.withObject { object in
+                object.withValue(forKey: "age") { value in
+                    value.int64 ?? 0
+                } ?? 0
+            } ?? 0
+        }
+
+        XCTAssertEqual(name, "Alice")
+        XCTAssertEqual(age, 30)
+    }
+
+    func testBorrowedArrayIteration() throws {
+        let document = try JSONDocument(string: "[1,2,3]")
+        var values: [Int64] = []
+
+        try document.withRootValue { root in
+            _ = root.withArray { array in
+                XCTAssertEqual(array.count, 3)
+                array.forEach { value in
+                    if let int = value.int64 {
+                        values.append(int)
+                    }
+                }
+            }
+        }
+
+        XCTAssertEqual(values, [1, 2, 3])
+    }
+
+    func testUniqueDocumentBorrowedRootValue() throws {
+        if #available(macOS 27.0, iOS 27.0, tvOS 27.0, watchOS 27.0, macCatalyst 27.0, visionOS 27.0, *) {
+            let document = try JSONUniqueDocument(string: #"{"enabled":true}"#)
+            let enabled = try document.withRootValue { root in
+                root.withObject { object in
+                    object.withValue(forKey: "enabled") { value in
+                        value.bool ?? false
+                    } ?? false
+                } ?? false
+            }
+            XCTAssertTrue(enabled)
+        }
+    }
 }
 
 class JSONDocumentComplexTests: XCTestCase {

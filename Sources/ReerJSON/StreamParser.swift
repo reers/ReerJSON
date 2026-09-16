@@ -147,22 +147,6 @@ public struct JSONStreamParser: Sendable {
         arrayState = .expectOpenBracket
     }
 
-    // MARK: - Internal Slice API (for streaming decoders)
-
-    /// Feeds data and returns raw byte slices for each parsed JSON value,
-    /// without constructing intermediate `JSONValue` instances. Used by the
-    /// streaming decoders to avoid an extra serialize-and-reparse round-trip.
-    internal mutating func parseSlices(_ data: Data) throws -> [Data] {
-        if !data.isEmpty { buffer.append(data) }
-        return try drainSlices(finalizing: false)
-    }
-
-    internal mutating func finalizeSlices() throws -> [Data] {
-        let results = try drainSlices(finalizing: true)
-        try validateAtEndOfStream()
-        return results
-    }
-
     // MARK: - Private Types
 
     private enum ArrayParseState: Sendable {
@@ -177,8 +161,6 @@ public struct JSONStreamParser: Sendable {
     private struct ParsedItem {
         /// yyjson document owning the parsed value.
         let document: Document
-        /// Byte range of this value in `buffer` (relative to `buffer.startIndex`).
-        let range: Range<Int>
     }
 
     // MARK: - Drain entry points
@@ -195,18 +177,6 @@ public struct JSONStreamParser: Sendable {
             results.append(JSONValue(value: root, document: item.document))
         }
         return results
-    }
-
-    private mutating func drainSlices(finalizing: Bool) throws -> [Data] {
-        compactIfNeeded()
-        let items = try drainItems(finalizing: finalizing)
-        var slices: [Data] = []
-        slices.reserveCapacity(items.count)
-        let start = buffer.startIndex
-        for item in items {
-            slices.append(buffer.subdata(in: (start + item.range.lowerBound)..<(start + item.range.upperBound)))
-        }
-        return slices
     }
 
     private mutating func drainItems(finalizing: Bool) throws -> [ParsedItem] {
@@ -346,7 +316,7 @@ public struct JSONStreamParser: Sendable {
                 return nil
             }
             readOffset = endOffset
-            return ParsedItem(document: doc, range: startOffset..<endOffset)
+            return ParsedItem(document: doc)
         }
     }
 

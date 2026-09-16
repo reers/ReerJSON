@@ -293,27 +293,33 @@ open class ReerJSONEncoder {
     
     private func sortObjectKeys(_ val: UnsafeMutablePointer<yyjson_mut_val>) {
         typealias MutVal = UnsafeMutablePointer<yyjson_mut_val>
+        typealias Pair = (keyVal: MutVal, val: MutVal, keyStr: UnsafePointer<CChar>)
 
         if yyjson_mut_is_obj(val) {
-            var pairs: [(keyVal: MutVal, val: MutVal, keyStr: UnsafePointer<CChar>)] = []
-            pairs.reserveCapacity(Int(yyjson_mut_obj_size(val)))
+            withTemporaryAllocation(of: Pair.self, capacity: Int(yyjson_mut_obj_size(val))) { pairs in
+                var iter = yyjson_mut_obj_iter()
+                guard yyjson_mut_obj_iter_init(val, &iter) else { return }
 
-            var iter = yyjson_mut_obj_iter()
-            guard yyjson_mut_obj_iter_init(val, &iter) else { return }
+                while let keyPtr = yyjson_mut_obj_iter_next(&iter) {
+                    guard let valPtr = yyjson_mut_obj_iter_get_val(keyPtr),
+                          let keyStr = yyjson_mut_get_str(keyPtr) else { continue }
+                    pairs.append((keyPtr, valPtr, keyStr))
+                }
 
-            while let keyPtr = yyjson_mut_obj_iter_next(&iter) {
-                guard let valPtr = yyjson_mut_obj_iter_get_val(keyPtr),
-                      let keyStr = yyjson_mut_get_str(keyPtr) else { continue }
-                pairs.append((keyPtr, valPtr, keyStr))
-            }
+                pairs.withUnsafeMutableBufferPointer { storage, initializedCount in
+                    var initialized = UnsafeMutableBufferPointer(
+                        start: storage.baseAddress,
+                        count: initializedCount
+                    )
+                    initialized.sort { strcmp($0.keyStr, $1.keyStr) < 0 }
 
-            pairs.sort { strcmp($0.keyStr, $1.keyStr) < 0 }
+                    yyjson_mut_obj_clear(val)
 
-            yyjson_mut_obj_clear(val)
-
-            for pair in pairs {
-                sortObjectKeys(pair.val)
-                yyjson_mut_obj_add(val, pair.keyVal, pair.val)
+                    for pair in initialized {
+                        sortObjectKeys(pair.val)
+                        yyjson_mut_obj_add(val, pair.keyVal, pair.val)
+                    }
+                }
             }
         } else if yyjson_mut_is_arr(val) {
             var iter = yyjson_mut_arr_iter()

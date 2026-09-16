@@ -125,8 +125,8 @@ func _printStackTrace(_ stackTrace: SourceLocStack?) {
   }
 }
 
-fileprivate var _anyExpectFailed = AtomicBool(false)
-fileprivate var _seenExpectCrash = AtomicBool(false)
+nonisolated(unsafe) fileprivate var _anyExpectFailed = AtomicBool(false)
+nonisolated(unsafe) fileprivate var _seenExpectCrash = AtomicBool(false)
 
 /// Run `body` and expect a failure to happen.
 ///
@@ -699,7 +699,7 @@ func _defaultTestSuiteFailedCallback() {
   abort()
 }
 
-var _testSuiteFailedCallback: () -> Void = _defaultTestSuiteFailedCallback
+nonisolated(unsafe) var _testSuiteFailedCallback: () -> Void = _defaultTestSuiteFailedCallback
 
 public func _setTestSuiteFailedCallback(_ callback: @escaping () -> Void) {
   _testSuiteFailedCallback = callback
@@ -709,7 +709,7 @@ func _defaultTrappingExpectationFailedCallback() {
   abort()
 }
 
-var _trappingExpectationFailedCallback: () -> Void
+nonisolated(unsafe) var _trappingExpectationFailedCallback: () -> Void
   = _defaultTrappingExpectationFailedCallback
 
 public func _setTrappingExpectationFailedCallback(callback: @escaping () -> Void) {
@@ -834,8 +834,8 @@ func _getOSVersion() -> OSVersion {
 #endif
 }
 
-var _runningOSVersion: OSVersion = _getOSVersion()
-var _overrideOSVersion: OSVersion?
+nonisolated(unsafe) var _runningOSVersion: OSVersion = _getOSVersion()
+nonisolated(unsafe) var _overrideOSVersion: OSVersion?
 
 /// Override the OS version for testing.
 public func _setOverrideOSVersion(_ v: OSVersion) {

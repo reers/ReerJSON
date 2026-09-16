@@ -433,7 +433,7 @@ final class JSONTests: XCTestCase {
 
     }
 
-    static var allTests = [
+    static let allTests = [
         ("testObject", testObject),
         ("testArray", testArray),
         ("testEscaping", testEscaping),

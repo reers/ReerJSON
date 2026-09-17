@@ -106,7 +106,7 @@ public enum ReerJSONSerialization {
             readOptions.insert(.json5)
         }
 
-        let document = try Document(data: data, options: readOptions)
+        let document = try DocumentRef(data: data, options: readOptions)
         guard let root = document.root else {
             throw JSONError.invalidData("Document has no root value")
         }

@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 6.4
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -46,11 +46,11 @@ let targetDependencies: [Target.Dependency] = [
 let package = Package(
     name: "ReerJSON",
     platforms: [
-        .macOS(.v10_13),
-        .iOS(.v12),
-        .tvOS(.v12),
-        .watchOS(.v6),
-        .macCatalyst(.v13),
+        .macOS(.v12),
+        .iOS(.v15),
+        .tvOS(.v15),
+        .watchOS(.v9),
+        .macCatalyst(.v15),
         .visionOS(.v1)
     ],
     products: [

@@ -130,6 +130,18 @@ public struct JSONStreamParser: Sendable {
         return try drainValues(finalizing: false)
     }
 
+    /// Feeds borrowed bytes to the parser and returns all complete JSON values found.
+    public mutating func parse(bytes: Span<UInt8>) throws -> [JSONValue] {
+        if !bytes.isEmpty {
+            bytes.withUnsafeBufferPointer { source in
+                if let base = source.baseAddress {
+                    buffer.append(base, count: source.count)
+                }
+            }
+        }
+        return try drainValues(finalizing: false)
+    }
+
     /// Signals end-of-stream and returns any remaining JSON values.
     ///
     /// After calling this method, the parser is in a finished state.
@@ -160,7 +172,7 @@ public struct JSONStreamParser: Sendable {
     /// One parsed value's metadata.
     private struct ParsedItem {
         /// yyjson document owning the parsed value.
-        let document: Document
+        let document: DocumentRef
     }
 
     // MARK: - Drain entry points
@@ -215,7 +227,7 @@ public struct JSONStreamParser: Sendable {
             switch arrayState {
             case .expectOpenBracket:
                 guard readOffset < buffer.count else { break loop }
-                let byte = buffer[buffer.startIndex + readOffset]
+                let byte = byteAtReadOffset()
                 guard byte == UInt8(ascii: "[") else {
                     throw JSONError.invalidJSON("Expected '[' at start of JSON array stream")
                 }
@@ -225,7 +237,7 @@ public struct JSONStreamParser: Sendable {
             case .expectElementOrClose:
                 skipWhitespace()
                 guard readOffset < buffer.count else { break loop }
-                let byte = buffer[buffer.startIndex + readOffset]
+                let byte = byteAtReadOffset()
                 if byte == UInt8(ascii: "]") {
                     readOffset += 1
                     arrayState = .done
@@ -238,7 +250,7 @@ public struct JSONStreamParser: Sendable {
             case .expectElementAfterComma:
                 skipWhitespace()
                 guard readOffset < buffer.count else { break loop }
-                let byte = buffer[buffer.startIndex + readOffset]
+                let byte = byteAtReadOffset()
                 if byte == UInt8(ascii: "]") {
                     guard allowsTrailingCommas else {
                         throw JSONError.invalidJSON("Trailing comma is not allowed in JSON array stream")
@@ -254,7 +266,7 @@ public struct JSONStreamParser: Sendable {
             case .expectCommaOrClose:
                 skipWhitespace()
                 guard readOffset < buffer.count else { break loop }
-                let byte = buffer[buffer.startIndex + readOffset]
+                let byte = byteAtReadOffset()
                 if byte == UInt8(ascii: ",") {
                     readOffset += 1
                     arrayState = .expectElementAfterComma
@@ -295,10 +307,10 @@ public struct JSONStreamParser: Sendable {
         // and copies the input — so we do not need to add YYJSON_PADDING_SIZE
         // bytes ourselves here.
         let startOffset = readOffset
-        let result: Document.StreamParseResult = try buffer.withUnsafeBytes { buf in
-            guard let base = buf.baseAddress else { return .needMoreData }
-            let ptr = base.advanced(by: startOffset).assumingMemoryBound(to: UInt8.self)
-            return try Document.streamParse(bytes: ptr, count: available, options: options)
+        let result: DocumentRef.StreamParseResult = try buffer.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress else { return .needMoreData }
+            let bytes = base.advanced(by: startOffset).assumingMemoryBound(to: UInt8.self)
+            return try DocumentRef.streamParse(bytes: bytes, count: available, options: options)
         }
 
         switch result {
@@ -329,11 +341,25 @@ public struct JSONStreamParser: Sendable {
     }
 
     private mutating func skipWhitespace() {
-        let startIdx = buffer.startIndex
-        while readOffset < buffer.count {
-            let byte = buffer[startIdx + readOffset]
-            guard byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D else { break }
-            readOffset += 1
+        buffer.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                return
+            }
+            while readOffset < rawBuffer.count {
+                let byte = base.advanced(by: readOffset).pointee
+                guard byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D else { break }
+                readOffset += 1
+            }
+        }
+    }
+
+    @inline(__always)
+    private func byteAtReadOffset() -> UInt8 {
+        buffer.withUnsafeBytes { rawBuffer in
+            rawBuffer.baseAddress!
+                .advanced(by: readOffset)
+                .assumingMemoryBound(to: UInt8.self)
+                .pointee
         }
     }
 
@@ -368,11 +394,8 @@ public struct JSONStreamParser: Sendable {
 
 /// The outcome of feeding a chunk of bytes to a ``JSONIncrementalReader``.
 ///
-/// This is intentionally a non-copyable enum rather than `JSONDocument?`
-/// because ``JSONDocument`` is `~Copyable`, and `Optional<~Copyable>` is
-/// not yet supported by Swift 5.10 (the minimum required by this package on
-/// Linux). Using a custom enum keeps the API ergonomic on every supported
-/// toolchain.
+/// This is a non-copyable enum because it carries a move-only ``JSONDocument``
+/// in the ready state while keeping the "need more data" state explicit.
 public enum JSONIncrementalReadResult: ~Copyable {
     /// The reader has fully assembled a complete document.
     case ready(JSONDocument)
@@ -392,7 +415,7 @@ public enum JSONIncrementalReadResult: ~Copyable {
 /// for try await chunk in stream {
 ///     switch try reader.feed(chunk) {
 ///     case .ready(let doc):
-///         // doc.root is now available
+///         // Traverse with doc.withRootValue { ... }
 ///         return doc
 ///     case .needMoreData:
 ///         continue
@@ -455,7 +478,7 @@ public final class JSONIncrementalReader: @unchecked Sendable {
         switch try parser.read() {
         case .success(let doc):
             finished = true
-            return .ready(JSONDocument(_document: doc))
+            return .ready(JSONDocument(_storage: doc))
         case .needMoreData:
             return .needMoreData
         }
@@ -473,7 +496,7 @@ public final class JSONIncrementalReader: @unchecked Sendable {
         switch try parser.read() {
         case .success(let doc):
             finished = true
-            return JSONDocument(_document: doc)
+            return JSONDocument(_storage: doc)
         case .needMoreData:
             throw JSONError.invalidJSON("Incomplete JSON value at end of stream")
         }

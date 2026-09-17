@@ -201,6 +201,97 @@ import yyjson
 // MARK: - Helper Functions
 
 @inline(__always)
+func yyReadDocument(
+    from buffer: UnsafeRawBufferPointer,
+    flags: yyjson_read_flag
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    guard let baseAddress = buffer.baseAddress else { return nil }
+    let pointer = UnsafeMutablePointer(
+        mutating: baseAddress.assumingMemoryBound(to: CChar.self)
+    )
+    return yyjson_read(pointer, buffer.count, flags)
+}
+
+@inline(__always)
+func yyReadDocument(
+    from buffer: UnsafeRawBufferPointer,
+    flags: yyjson_read_flag,
+    error: inout yyjson_read_err
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    guard let baseAddress = buffer.baseAddress else { return nil }
+    let pointer = UnsafeMutablePointer(
+        mutating: baseAddress.assumingMemoryBound(to: CChar.self)
+    )
+    return yyjson_read_opts(pointer, buffer.count, flags, nil, &error)
+}
+
+@inline(__always)
+func yyReadDocument(
+    mutating buffer: UnsafeMutableRawBufferPointer,
+    validByteCount: Int,
+    flags: yyjson_read_flag
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    guard let baseAddress = buffer.baseAddress else { return nil }
+    let pointer = baseAddress.assumingMemoryBound(to: CChar.self)
+    return yyjson_read(pointer, validByteCount, flags)
+}
+
+@inline(__always)
+func yyReadDocument(
+    mutating buffer: UnsafeMutableRawBufferPointer,
+    validByteCount: Int,
+    flags: yyjson_read_flag,
+    error: inout yyjson_read_err
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    guard let baseAddress = buffer.baseAddress else { return nil }
+    let pointer = baseAddress.assumingMemoryBound(to: CChar.self)
+    return yyjson_read_opts(pointer, validByteCount, flags, nil, &error)
+}
+
+@inline(__always)
+func yyReadDocument(
+    from data: Data,
+    flags: yyjson_read_flag
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    data.withUnsafeBytes { buffer in
+        yyReadDocument(from: buffer, flags: flags)
+    }
+}
+
+@inline(__always)
+func yyReadDocument(
+    from data: Data,
+    flags: yyjson_read_flag,
+    error: inout yyjson_read_err
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    data.withUnsafeBytes { buffer in
+        yyReadDocument(from: buffer, flags: flags, error: &error)
+    }
+}
+
+@inline(__always)
+func yyReadDocument(
+    from bytes: RawSpan,
+    flags: yyjson_read_flag
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    bytes.withUnsafeBytes { buffer in
+        yyReadDocument(from: buffer, flags: flags)
+    }
+}
+
+@inline(__always)
+func yyReadDocument(
+    from bytes: RawSpan,
+    flags: yyjson_read_flag,
+    error: inout yyjson_read_err
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    bytes.withUnsafeBytes { buffer in
+        yyReadDocument(from: buffer, flags: flags, error: &error)
+    }
+}
+
+@usableFromInline
+@inline(__always)
 func yyObjGet(
     _ obj: UnsafeMutablePointer<yyjson_val>,
     key: String
@@ -240,38 +331,44 @@ func yyFromString(
 ///   avoiding Swift String allocations during sorting.
 func sortObjectKeys(_ val: UnsafeMutablePointer<yyjson_mut_val>) throws {
     typealias MutVal = UnsafeMutablePointer<yyjson_mut_val>
+    typealias Pair = (keyVal: MutVal, val: MutVal, keyStr: UnsafePointer<CChar>)
 
     if yyjson_mut_is_obj(val) {
-        var pairs: [(keyVal: MutVal, val: MutVal, keyStr: UnsafePointer<CChar>)] = []
-        pairs.reserveCapacity(Int(yyjson_mut_obj_size(val)))
-
-        var iter = yyjson_mut_obj_iter()
-        guard yyjson_mut_obj_iter_init(val, &iter) else {
-            throw JSONError.invalidData("Failed to initialize object iterator during key sorting")
-        }
-
-        while let keyPtr = yyjson_mut_obj_iter_next(&iter) {
-            guard let valPtr = yyjson_mut_obj_iter_get_val(keyPtr) else {
-                throw JSONError.invalidData("Object key has no associated value during key sorting")
+        try withTemporaryAllocation(of: Pair.self, capacity: Int(yyjson_mut_obj_size(val))) { pairs in
+            var iter = yyjson_mut_obj_iter()
+            guard yyjson_mut_obj_iter_init(val, &iter) else {
+                throw JSONError.invalidData("Failed to initialize object iterator during key sorting")
             }
-            guard let keyStr = yyjson_mut_get_str(keyPtr) else {
-                throw JSONError.invalidData("Object key is not a string during key sorting")
+
+            while let keyPtr = yyjson_mut_obj_iter_next(&iter) {
+                guard let valPtr = yyjson_mut_obj_iter_get_val(keyPtr) else {
+                    throw JSONError.invalidData("Object key has no associated value during key sorting")
+                }
+                guard let keyStr = yyjson_mut_get_str(keyPtr) else {
+                    throw JSONError.invalidData("Object key is not a string during key sorting")
+                }
+                pairs.append((keyPtr, valPtr, keyStr))
             }
-            pairs.append((keyPtr, valPtr, keyStr))
-        }
 
-        pairs.sort { pair1, pair2 in
-            return strcmp(pair1.keyStr, pair2.keyStr) < 0
-        }
+            try pairs.withUnsafeMutableBufferPointer { storage, initializedCount in
+                var initialized = UnsafeMutableBufferPointer(
+                    start: storage.baseAddress,
+                    count: initializedCount
+                )
+                initialized.sort { pair1, pair2 in
+                    strcmp(pair1.keyStr, pair2.keyStr) < 0
+                }
 
-        guard yyjson_mut_obj_clear(val) else {
-            throw JSONError.invalidData("Failed to clear object during key sorting")
-        }
+                guard yyjson_mut_obj_clear(val) else {
+                    throw JSONError.invalidData("Failed to clear object during key sorting")
+                }
 
-        for pair in pairs {
-            try sortObjectKeys(pair.val)
-            guard yyjson_mut_obj_add(val, pair.keyVal, pair.val) else {
-                throw JSONError.invalidData("Failed to add key back to object during key sorting")
+                for pair in initialized {
+                    try sortObjectKeys(pair.val)
+                    guard yyjson_mut_obj_add(val, pair.keyVal, pair.val) else {
+                        throw JSONError.invalidData("Failed to add key back to object during key sorting")
+                    }
+                }
             }
         }
     } else if yyjson_mut_is_arr(val) {

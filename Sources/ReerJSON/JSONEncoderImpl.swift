@@ -241,8 +241,28 @@ class JSONEncoderImpl: Encoder {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_sint64(doc, $0.baseAddress, $0.count) }
     }
     @inline(__always) func wrapBulkIntArray(_ arr: [Int]) -> UnsafeMutablePointer<yyjson_mut_val> {
-        let mapped = arr.map { Int64($0) }
-        return mapped.withUnsafeBufferPointer { yyjson_mut_arr_with_sint64(doc, $0.baseAddress, $0.count) }
+        arr.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else {
+                return yyjson_mut_arr(doc)!
+            }
+            if MemoryLayout<Int>.size == MemoryLayout<Int64>.size,
+               MemoryLayout<Int>.alignment == MemoryLayout<Int64>.alignment {
+                return baseAddress.withMemoryRebound(to: Int64.self, capacity: buffer.count) {
+                    yyjson_mut_arr_with_sint64(doc, $0, buffer.count)
+                }
+            }
+            return withTemporaryAllocation(of: Int64.self, capacity: buffer.count) { values in
+                var result: UnsafeMutablePointer<yyjson_mut_val>?
+                values.withUnsafeMutableBufferPointer { pointer, initializedCount in
+                    for index in 0..<buffer.count {
+                        pointer[index] = Int64(buffer[index])
+                    }
+                    initializedCount = buffer.count
+                    result = yyjson_mut_arr_with_sint64(doc, pointer.baseAddress, initializedCount)
+                }
+                return result!
+            }
+        }
     }
     @inline(__always) func wrapBulkUInt8Array(_ arr: [UInt8]) -> UnsafeMutablePointer<yyjson_mut_val> {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_uint8(doc, $0.baseAddress, $0.count) }
@@ -257,8 +277,28 @@ class JSONEncoderImpl: Encoder {
         arr.withUnsafeBufferPointer { yyjson_mut_arr_with_uint64(doc, $0.baseAddress, $0.count) }
     }
     @inline(__always) func wrapBulkUIntArray(_ arr: [UInt]) -> UnsafeMutablePointer<yyjson_mut_val> {
-        let mapped = arr.map { UInt64($0) }
-        return mapped.withUnsafeBufferPointer { yyjson_mut_arr_with_uint64(doc, $0.baseAddress, $0.count) }
+        arr.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else {
+                return yyjson_mut_arr(doc)!
+            }
+            if MemoryLayout<UInt>.size == MemoryLayout<UInt64>.size,
+               MemoryLayout<UInt>.alignment == MemoryLayout<UInt64>.alignment {
+                return baseAddress.withMemoryRebound(to: UInt64.self, capacity: buffer.count) {
+                    yyjson_mut_arr_with_uint64(doc, $0, buffer.count)
+                }
+            }
+            return withTemporaryAllocation(of: UInt64.self, capacity: buffer.count) { values in
+                var result: UnsafeMutablePointer<yyjson_mut_val>?
+                values.withUnsafeMutableBufferPointer { pointer, initializedCount in
+                    for index in 0..<buffer.count {
+                        pointer[index] = UInt64(buffer[index])
+                    }
+                    initializedCount = buffer.count
+                    result = yyjson_mut_arr_with_uint64(doc, pointer.baseAddress, initializedCount)
+                }
+                return result!
+            }
+        }
     }
     @inline(__always) func wrapBulkStringArray(_ arr: [String]) -> UnsafeMutablePointer<yyjson_mut_val> {
         let result = yyjson_mut_arr(doc)!

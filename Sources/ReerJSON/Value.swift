@@ -24,16 +24,20 @@
 import yyjson
 import Foundation
 
-// MARK: - Document (Internal)
+// MARK: - Document Storage (Internal)
 
-/// A safe wrapper around a yyjson document.
+/// Move-only owner for a yyjson document.
 ///
-/// The document is immutable after creation and safe for concurrent reads.
-internal final class Document: @unchecked Sendable {
+/// The storage directly owns `yyjson_doc` and the optional in-place input
+/// buffer. It is immutable after creation and safe for concurrent reads.
+@usableFromInline
+internal struct DocumentStorage: ~Copyable, @unchecked Sendable {
+    @usableFromInline
     let doc: UnsafeMutablePointer<yyjson_doc>
 
     /// Retained data buffer (used when parsing consumes the input).
-    private var retainedData: Data?
+    @usableFromInline
+    let retainedData: Data?
 
     /// Creates a document by parsing JSON data.
     ///
@@ -48,22 +52,17 @@ internal final class Document: @unchecked Sendable {
         // In-place parsing must use the dedicated consuming initializer.
         flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
 
-        self.retainedData = nil
-
         if data.isEmpty {
             throw JSONError.invalidJSON("Empty content")
         }
 
-        let result = data.withUnsafeBytes { bytes -> UnsafeMutablePointer<yyjson_doc>? in
-            guard let baseAddress = bytes.baseAddress else { return nil }
-            let ptr = UnsafeMutablePointer(mutating: baseAddress.assumingMemoryBound(to: CChar.self))
-            return yyjson_read_opts(ptr, data.count, flags, nil, &error)
-        }
+        let result = yyReadDocument(from: data, flags: flags, error: &error)
 
         guard let doc = result else {
             throw JSONError(parsing: error)
         }
         self.doc = doc
+        self.retainedData = nil
     }
 
     /// Creates a document by consuming mutable data.
@@ -92,55 +91,117 @@ internal final class Document: @unchecked Sendable {
         data.reserveCapacity(originalCount + paddingSize)
         data.append(contentsOf: repeatElement(0 as UInt8, count: paddingSize))
 
-        self.retainedData = data
-
-        let result = self.retainedData!.withUnsafeMutableBytes { bytes -> UnsafeMutablePointer<yyjson_doc>? in
-            let ptr = bytes.baseAddress?.assumingMemoryBound(to: CChar.self)
-            return yyjson_read_opts(ptr, originalCount, flags, nil, &error)
+        let result = data.withUnsafeMutableBytes { bytes in
+            yyReadDocument(
+                mutating: bytes,
+                validByteCount: originalCount,
+                flags: flags,
+                error: &error
+            )
         }
 
         guard let doc = result else {
             throw JSONError(parsing: error)
         }
         self.doc = doc
+        self.retainedData = data
+        data.removeAll(keepingCapacity: false)
     }
 
-    /// Result of a streaming parse attempt.
+    deinit {
+        yyjson_doc_free(doc)
+    }
+
+    @usableFromInline
+    @inline(__always)
+    var root: UnsafeMutablePointer<yyjson_val>? {
+        yyjson_doc_get_root(doc)
+    }
+}
+
+// MARK: - Document Reference (Internal)
+
+/// Reference owner for JSON values that are allowed to escape independently of
+/// a `JSONDocument`.
+///
+/// This keeps the copyable ``JSONValue`` API safe while letting
+/// ``JSONDocument`` use move-only storage for borrowed traversal.
+internal final class DocumentRef: @unchecked Sendable {
+    let doc: UnsafeMutablePointer<yyjson_doc>
+
+    private let retainedData: Data?
+
+    init(data: Data, options: JSONReadOptions = .default) throws {
+        var error = yyjson_read_err()
+        var flags = options.yyjsonFlags
+        flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
+
+        if data.isEmpty {
+            throw JSONError.invalidJSON("Empty content")
+        }
+
+        let result = yyReadDocument(from: data, flags: flags, error: &error)
+
+        guard let doc = result else {
+            throw JSONError(parsing: error)
+        }
+        self.doc = doc
+        self.retainedData = nil
+    }
+
+    init(consuming data: inout Data, options: JSONReadOptions = .default) throws {
+        var error = yyjson_read_err()
+        var flags = options.yyjsonFlags
+        flags |= YYJSON_READ_INSITU
+
+        if data.isEmpty {
+            throw JSONError.invalidJSON("Empty content")
+        }
+
+        let paddingSize = Int(YYJSON_PADDING_SIZE)
+        let originalCount = data.count
+
+        data.reserveCapacity(originalCount + paddingSize)
+        data.append(contentsOf: repeatElement(0 as UInt8, count: paddingSize))
+
+        let result = data.withUnsafeMutableBytes { bytes in
+            yyReadDocument(
+                mutating: bytes,
+                validByteCount: originalCount,
+                flags: flags,
+                error: &error
+            )
+        }
+
+        guard let doc = result else {
+            throw JSONError(parsing: error)
+        }
+        self.doc = doc
+        self.retainedData = data
+        data.removeAll(keepingCapacity: false)
+    }
+
     enum StreamParseResult {
-        case success(Document, consumedBytes: Int)
+        case success(DocumentRef, consumedBytes: Int)
         case needMoreData
     }
 
-    /// Attempts to parse one JSON value from bytes with `STOP_WHEN_DONE`.
-    ///
-    /// The bytes do not need to be padded; for non-INSITU parsing yyjson
-    /// allocates and pads its own internal buffer.
-    ///
-    /// - Parameters:
-    ///   - bytes: Pointer to the JSON bytes.
-    ///   - count: Number of valid bytes.
-    ///   - options: Options for reading the JSON.
-    /// - Returns: `.success` with consumed byte count, or `.needMoreData` if incomplete.
-    /// - Throws: `JSONError` for non-recoverable parse errors.
     static func streamParse(
-        bytes: UnsafePointer<UInt8>, count: Int,
+        bytes: Span<UInt8>,
         options: JSONReadOptions
     ) throws -> StreamParseResult {
-        guard count > 0 else { return .needMoreData }
+        guard !bytes.isEmpty else { return .needMoreData }
 
         var error = yyjson_read_err()
         var flags = options.yyjsonFlags
         flags |= YYJSON_READ_STOP_WHEN_DONE
         flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
 
-        let ptr = UnsafeMutablePointer(
-            mutating: UnsafeRawPointer(bytes).assumingMemoryBound(to: CChar.self)
-        )
-        let result = yyjson_read_opts(ptr, count, flags, nil, &error)
+        let result = yyReadDocument(from: bytes.bytes, flags: flags, error: &error)
 
         if let doc = result {
             let consumed = yyjson_doc_get_read_size(doc)
-            return .success(Document(alreadyParsed: doc), consumedBytes: consumed)
+            return .success(DocumentRef(alreadyParsed: doc), consumedBytes: consumed)
         }
 
         if error.code == YYJSON_READ_ERROR_UNEXPECTED_END
@@ -151,7 +212,34 @@ internal final class Document: @unchecked Sendable {
         throw JSONError(parsing: error)
     }
 
-    /// Adopts an already-parsed yyjson_doc, taking ownership.
+    static func streamParse(
+        bytes: UnsafePointer<UInt8>,
+        count: Int,
+        options: JSONReadOptions
+    ) throws -> StreamParseResult {
+        guard count > 0 else { return .needMoreData }
+
+        var error = yyjson_read_err()
+        var flags = options.yyjsonFlags
+        flags |= YYJSON_READ_STOP_WHEN_DONE
+        flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
+
+        let rawBuffer = UnsafeRawBufferPointer(start: bytes, count: count)
+        let result = yyReadDocument(from: rawBuffer, flags: flags, error: &error)
+
+        if let doc = result {
+            let consumed = yyjson_doc_get_read_size(doc)
+            return .success(DocumentRef(alreadyParsed: doc), consumedBytes: consumed)
+        }
+
+        if error.code == YYJSON_READ_ERROR_UNEXPECTED_END
+            || error.code == YYJSON_READ_ERROR_EMPTY_CONTENT {
+            return .needMoreData
+        }
+
+        throw JSONError(parsing: error)
+    }
+
     init(alreadyParsed doc: UnsafeMutablePointer<yyjson_doc>) {
         self.doc = doc
         self.retainedData = nil
@@ -201,8 +289,8 @@ internal final class IncrementalParser {
     }
 
     /// Result of an incremental read.
-    enum ReadResult {
-        case success(Document)
+    enum ReadResult: ~Copyable {
+        case success(DocumentStorage)
         case needMoreData
     }
 
@@ -210,8 +298,8 @@ internal final class IncrementalParser {
         guard !buffer.isEmpty else { return .needMoreData }
 
         do {
-            let doc = try Document(data: buffer, options: options)
-            return .success(doc)
+            let storage = try DocumentStorage(data: buffer, options: options)
+            return .success(storage)
         } catch let error as JSONError {
             if error.readErrorCode == UInt32(YYJSON_READ_ERROR_UNEXPECTED_END)
                 || error.readErrorCode == UInt32(YYJSON_READ_ERROR_EMPTY_CONTENT) {
@@ -241,9 +329,14 @@ internal final class IncrementalParser {
 ///
 /// ```swift
 /// let document = try JSONDocument(data: jsonData)
-/// if let root = document.root {
-///     print(root["name"]?.string ?? "unknown")
+/// let name = try document.withRootValue { root in
+///     root.withObject { object in
+///         object.withValue(forKey: "name") { value in
+///             value.string ?? "unknown"
+///         } ?? "unknown"
+///     } ?? "unknown"
 /// }
+/// print(name)
 /// ```
 ///
 /// For highest performance with large documents,
@@ -255,11 +348,12 @@ internal final class IncrementalParser {
 /// // `data` is now consumed and should not be used
 /// ```
 public struct JSONDocument: ~Copyable, @unchecked Sendable {
-    internal let _document: Document
+    @usableFromInline
+    internal let _storage: DocumentStorage
 
     /// Creates a document from a pre-parsed internal document.
-    internal init(_document: Document) {
-        self._document = _document
+    internal init(_storage: consuming DocumentStorage) {
+        self._storage = _storage
     }
 
     /// Creates a document by parsing JSON data.
@@ -269,7 +363,7 @@ public struct JSONDocument: ~Copyable, @unchecked Sendable {
     ///   - options: Options for reading the JSON.
     /// - Throws: `JSONError` if parsing fails.
     public init(data: Data, options: JSONReadOptions = .default) throws {
-        self._document = try Document(data: data, options: options)
+        self._storage = try DocumentStorage(data: data, options: options)
     }
 
     /// Creates a document by parsing a JSON string.
@@ -282,7 +376,7 @@ public struct JSONDocument: ~Copyable, @unchecked Sendable {
         guard let data = string.data(using: .utf8) else {
             throw JSONError.invalidJSON("Invalid UTF-8 string")
         }
-        self._document = try Document(data: data, options: options)
+        self._storage = try DocumentStorage(data: data, options: options)
     }
 
     /// Creates a document by parsing JSON data in place,
@@ -300,29 +394,211 @@ public struct JSONDocument: ~Copyable, @unchecked Sendable {
     ///   - options: Options for reading the JSON.
     /// - Throws: `JSONError` if parsing fails.
     public init(parsingInPlace data: inout Data, options: JSONReadOptions = .default) throws {
-        self._document = try Document(consuming: &data, options: options)
+        self._storage = try DocumentStorage(consuming: &data, options: options)
     }
 
-    /// The root value of the parsed JSON document.
+    /// Accesses the root value as a non-copyable borrowed view.
     ///
-    /// Returns `nil` if the document has no root value.
-    public var root: JSONValue? {
-        guard let root = _document.root else {
-            return nil
+    /// The borrowed view does not retain the underlying document, so traversing
+    /// through this API avoids ARC traffic from creating ``JSONValue`` wrappers.
+    @inlinable
+    @inline(__always)
+    public borrowing func withRootValue<R>(
+        _ body: (borrowing JSONBorrowedValue) throws -> R
+    ) throws -> R {
+        guard let root = _storage.root else {
+            throw JSONError.invalidData("Document has no root value")
         }
-        return JSONValue(value: root, document: _document)
+        let value = JSONBorrowedValue(value: root)
+        return try body(value)
+    }
+}
+
+// MARK: - Borrowed Value
+
+/// A non-copyable view of a JSON value borrowed from a ``JSONDocument``.
+///
+/// Use ``JSONDocument/withRootValue(_:)`` to create borrowed views. They avoid
+/// retaining the owning document while traversing a DOM tree.
+public struct JSONBorrowedValue: ~Copyable, @unchecked Sendable {
+    @usableFromInline
+    let value: UnsafeMutablePointer<yyjson_val>?
+
+    @usableFromInline
+    @inline(__always)
+    internal init(value: UnsafeMutablePointer<yyjson_val>?) {
+        self.value = value
     }
 
-    /// The root value as an object, or `nil` if the root is not an object
-    /// or if the document has no root value.
-    public var rootObject: JSONObject? {
-        root?.object
+    /// Whether this value is null.
+    @inlinable
+    @inline(__always)
+    public var isNull: Bool {
+        yyjson_is_null(value)
     }
 
-    /// The root value as an array, or `nil` if the root is not an array
-    /// or if the document has no root value.
-    public var rootArray: JSONArray? {
-        root?.array
+    /// Get the string value, or nil if not a string.
+    @inlinable
+    @inline(__always)
+    public var string: String? {
+        guard let cString = yyjson_get_str(value) else { return nil }
+        return String(cString: cString)
+    }
+
+    /// Get the raw C string pointer, or nil if not a string.
+    @inlinable
+    @inline(__always)
+    public var cString: UnsafePointer<CChar>? {
+        yyjson_get_str(value)
+    }
+
+    /// The integer value as `Int64`, or `nil` if not stored as an integer.
+    @inlinable
+    @inline(__always)
+    public var int64: Int64? {
+        guard yyjson_is_int(value) else { return nil }
+        return yyjson_get_sint(value)
+    }
+
+    /// The number value as `Double`, or `nil` if not a number.
+    @inlinable
+    @inline(__always)
+    public var number: Double? {
+        guard yyjson_is_num(value) else { return nil }
+        return yyjson_get_num(value)
+    }
+
+    /// The Boolean value, or `nil` if not a Boolean.
+    @inlinable
+    @inline(__always)
+    public var bool: Bool? {
+        guard yyjson_is_bool(value) else { return nil }
+        return yyjson_get_bool(value)
+    }
+
+    /// Borrows this value as an object.
+    @inlinable
+    @inline(__always)
+    public borrowing func withObject<R>(
+        _ body: (borrowing JSONBorrowedObject) throws -> R
+    ) rethrows -> R? {
+        guard let value, yyjson_is_obj(value) else { return nil }
+        let object = JSONBorrowedObject(value: value)
+        return try body(object)
+    }
+
+    /// Borrows this value as an array.
+    @inlinable
+    @inline(__always)
+    public borrowing func withArray<R>(
+        _ body: (borrowing JSONBorrowedArray) throws -> R
+    ) rethrows -> R? {
+        guard let value, yyjson_is_arr(value) else { return nil }
+        let array = JSONBorrowedArray(value: value)
+        return try body(array)
+    }
+}
+
+/// A non-copyable borrowed view of a JSON object.
+public struct JSONBorrowedObject: ~Copyable, @unchecked Sendable {
+    @usableFromInline
+    let value: UnsafeMutablePointer<yyjson_val>
+
+    @usableFromInline
+    @inline(__always)
+    internal init(value: UnsafeMutablePointer<yyjson_val>) {
+        self.value = value
+    }
+
+    /// The number of key-value pairs in the object.
+    @inlinable
+    @inline(__always)
+    public var count: Int {
+        Int(yyjson_get_len(value))
+    }
+
+    /// Whether the object has no key-value pairs.
+    @inlinable
+    @inline(__always)
+    public var isEmpty: Bool {
+        count == 0
+    }
+
+    /// Borrows a value by key.
+    @inlinable
+    @inline(__always)
+    public borrowing func withValue<R>(
+        forKey key: String,
+        _ body: (borrowing JSONBorrowedValue) throws -> R
+    ) rethrows -> R? {
+        guard let child = yyObjGet(value, key: key) else { return nil }
+        let borrowed = JSONBorrowedValue(value: child)
+        return try body(borrowed)
+    }
+
+    /// Borrows each key-value pair in storage order.
+    @inlinable
+    @inline(__always)
+    public borrowing func forEach(
+        _ body: (String, borrowing JSONBorrowedValue) throws -> Void
+    ) rethrows {
+        var iterator = yyjson_obj_iter_with(value)
+        while let keyValue = yyjson_obj_iter_next(&iterator) {
+            guard let keyString = yyjson_get_str(keyValue) else { continue }
+            let child = JSONBorrowedValue(value: yyjson_obj_iter_get_val(keyValue))
+            try body(String(cString: keyString), child)
+        }
+    }
+}
+
+/// A non-copyable borrowed view of a JSON array.
+public struct JSONBorrowedArray: ~Copyable, @unchecked Sendable {
+    @usableFromInline
+    let value: UnsafeMutablePointer<yyjson_val>
+
+    @usableFromInline
+    @inline(__always)
+    internal init(value: UnsafeMutablePointer<yyjson_val>) {
+        self.value = value
+    }
+
+    /// The number of elements in the array.
+    @inlinable
+    @inline(__always)
+    public var count: Int {
+        Int(yyjson_get_len(value))
+    }
+
+    /// Whether the array has no elements.
+    @inlinable
+    @inline(__always)
+    public var isEmpty: Bool {
+        count == 0
+    }
+
+    /// Borrows an element by index.
+    @inlinable
+    @inline(__always)
+    public borrowing func withElement<R>(
+        at index: Int,
+        _ body: (borrowing JSONBorrowedValue) throws -> R
+    ) rethrows -> R? {
+        guard let child = yyjson_arr_get(value, index) else { return nil }
+        let borrowed = JSONBorrowedValue(value: child)
+        return try body(borrowed)
+    }
+
+    /// Borrows each element in order.
+    @inlinable
+    @inline(__always)
+    public borrowing func forEach(
+        _ body: (borrowing JSONBorrowedValue) throws -> Void
+    ) rethrows {
+        var iterator = yyjson_arr_iter_with(value)
+        while let child = yyjson_arr_iter_next(&iterator) {
+            let borrowed = JSONBorrowedValue(value: child)
+            try body(borrowed)
+        }
     }
 }
 
@@ -384,14 +660,14 @@ public struct JSONValue: @unchecked Sendable {
     }
 
     /// The document that owns this value (for lifetime management).
-    let document: Document
+    let document: DocumentRef
 
     /// Initializes from a yyjson value pointer.
     ///
     /// - Parameters:
     ///   - value: The yyjson value pointer, or `nil` for null.
     ///   - document: The document that owns this value (for lifetime management).
-    init(value: UnsafeMutablePointer<yyjson_val>?, document: Document) {
+    init(value: UnsafeMutablePointer<yyjson_val>?, document: DocumentRef) {
         self.document = document
 
         guard let val = value else {
@@ -551,9 +827,9 @@ extension JSONValue: CustomStringConvertible {
 /// because the underlying yyjson document is immutable after parsing.
 public struct JSONObject: @unchecked Sendable {
     internal let value: UnsafeMutablePointer<yyjson_val>
-    internal let document: Document
+    internal let document: DocumentRef
 
-    internal init(value: UnsafeMutablePointer<yyjson_val>, document: Document) {
+    internal init(value: UnsafeMutablePointer<yyjson_val>, document: DocumentRef) {
         self.value = value
         self.document = document
     }
@@ -610,10 +886,10 @@ extension JSONObject: Sequence {
 
 /// Iterator for JSON object key-value pairs.
 public struct JSONObjectIterator: IteratorProtocol {
-    private let document: Document
+    private let document: DocumentRef
     private var iterator: yyjson_obj_iter
 
-    internal init(value: UnsafeMutablePointer<yyjson_val>, document: Document) {
+    internal init(value: UnsafeMutablePointer<yyjson_val>, document: DocumentRef) {
         self.document = document
         self.iterator = yyjson_obj_iter_with(value)
     }
@@ -651,9 +927,9 @@ extension JSONObject: CustomStringConvertible {
 /// because the underlying yyjson document is immutable after parsing.
 public struct JSONArray: @unchecked Sendable {
     internal let value: UnsafeMutablePointer<yyjson_val>
-    internal let document: Document
+    internal let document: DocumentRef
 
-    internal init(value: UnsafeMutablePointer<yyjson_val>, document: Document) {
+    internal init(value: UnsafeMutablePointer<yyjson_val>, document: DocumentRef) {
         self.value = value
         self.document = document
     }
@@ -688,10 +964,10 @@ extension JSONArray: Sequence {
 
 /// Iterator for JSON array elements.
 public struct JSONArrayIterator: IteratorProtocol {
-    private let document: Document
+    private let document: DocumentRef
     private var iterator: yyjson_arr_iter
 
-    internal init(value: UnsafeMutablePointer<yyjson_val>, document: Document) {
+    internal init(value: UnsafeMutablePointer<yyjson_val>, document: DocumentRef) {
         self.document = document
         self.iterator = yyjson_arr_iter_with(value)
     }
@@ -721,7 +997,7 @@ extension JSONValue {
     ///   - options: Options for reading the JSON.
     /// - Throws: `JSONError` if parsing fails.
     public init(data: Data, options: JSONReadOptions = .default) throws {
-        let document = try Document(data: data, options: options)
+        let document = try DocumentRef(data: data, options: options)
         guard let root = document.root else {
             throw JSONError.invalidData("Document has no root value")
         }
@@ -776,7 +1052,7 @@ extension JSONValue {
     public static func parseInPlace(consuming data: inout Data, options: JSONReadOptions = .default) throws
         -> JSONValue
     {
-        let document = try Document(consuming: &data, options: options)
+        let document = try DocumentRef(consuming: &data, options: options)
         guard let root = document.root else {
             throw JSONError.invalidData("Document has no root value")
         }

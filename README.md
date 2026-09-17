@@ -47,6 +47,10 @@ Tested with ReerJSON 1.0.1, ZippyJSON 1.2.15, IkigaJSON 2.3.2
 
 # Installation
 
+ReerJSON requires Swift 6.4 or newer while keeping the package's existing
+Apple platform deployment targets: macOS 12, iOS 15, tvOS 15, watchOS 9,
+Mac Catalyst 15, and visionOS 1.
+
 ## Swift Package Manager
 
 Add dependency in `Package.swift` or project `Package Dependencies`
@@ -96,6 +100,23 @@ if let name = value["users"]?[0]?["name"]?.string {
 }
 ```
 
+For hot DOM traversal, use `JSONDocument` and borrow values from the document
+instead of creating escaping `JSONValue` wrappers for every child:
+
+```swift
+let document = try JSONDocument(string: json)
+
+let userCount = try document.withRootValue { root in
+    root.withObject { object in
+        object.withValue(forKey: "users") { users in
+            users.withArray { array in
+                array.count
+            } ?? 0
+        } ?? 0
+    } ?? 0
+}
+```
+
 ## In-Place Parsing
 
 For maximum performance with large JSON files,
@@ -112,7 +133,7 @@ avoiding memory allocation for string storage.
 The `inout` parameter makes it clear that the data is consumed by this operation.
 
 > [!NOTE]
-> For most use cases, the standard `YYJSONValue(data:)` initializer is sufficient.
+> For most use cases, the standard `JSONValue(data:)` initializer is sufficient.
 > Use in-place parsing only when performance is critical
 > and you can accept the ownership semantics.
 
@@ -169,8 +190,8 @@ for try await event in dataChunks.decode(Event.self, mode: .jsonLines) {
 }
 ```
 
-`AsyncSequence` adapters are available on macOS 10.15, iOS 13, tvOS 13,
-and watchOS 6 or newer.
+`AsyncSequence` adapters are available on macOS 12, iOS 15, tvOS 15, watchOS 9,
+Mac Catalyst 15, and visionOS 1 when building with Swift 6.4 or newer.
 
 ## JSONSerialization Alternative
 

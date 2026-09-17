@@ -212,24 +212,12 @@ final class JSONDecoderImpl: Decoder {
         if type == [UInt64].self {
             return try unboxArray(from: value, as: [UInt64].self, for: codingPathNode, additionalKey) as! T
         }
-        #if compiler(>=6.0)
-        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *) {
-            if type == [Int128].self {
-                return try unboxArray(from: value, as: [Int128].self, for: codingPathNode, additionalKey) as! T
-            }
-            if type == [UInt128].self {
-                return try unboxArray(from: value, as: [UInt128].self, for: codingPathNode, additionalKey) as! T
-            }
-        }
-        #endif
-        
         return try with(value: value, path: codingPathNode.appending(additionalKey)) {
             try type.init(from: self)
         }
     }
     
-    #if !os(Linux)
-    @available(macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1, *)
+#if !os(Linux)
     @inline(__always)
     func unbox<T: DecodableWithConfiguration>(
         _ value: JSON,
@@ -469,23 +457,7 @@ final class JSONDecoderImpl: Decoder {
                 let intValue: UInt64 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
                 decodedValue = intValue as! T
             } else {
-                #if compiler(>=6.0)
-                if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *) {
-                    if T.self == Int128.self {
-                        let intValue: Int128 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
-                        decodedValue = intValue as! T
-                    } else if T.self == UInt128.self {
-                        let intValue: UInt128 = try unboxInteger(elementValue, for: arrayCodingPathNode, indexKey)
-                        decodedValue = intValue as! T
-                    } else {
-                        decodedValue = try unbox(elementValue, as: T.self, for: arrayCodingPathNode, indexKey)
-                    }
-                } else {
-                    decodedValue = try unbox(elementValue, as: T.self, for: arrayCodingPathNode, indexKey)
-                }
-                #else
-                    decodedValue = try unbox(elementValue, as: T.self, for: arrayCodingPathNode, indexKey)
-                #endif
+                decodedValue = try unbox(elementValue, as: T.self, for: arrayCodingPathNode, indexKey)
             }
             
             result.append(decodedValue)
@@ -619,12 +591,10 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
         try decodeInteger()
     }
   
-    #if compiler(>=6.0)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, macCatalyst 18.0, visionOS 2.0, *)
     func decode(_: Int128.Type) throws -> Int128 {
         try decodeInteger()
     }
-    #endif
 
     func decode(_: UInt.Type) throws -> UInt {
         try decodeInteger()
@@ -646,12 +616,10 @@ extension JSONDecoderImpl: SingleValueDecodingContainer {
         try decodeInteger()
     }
     
-    #if compiler(>=6.0)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, macCatalyst 18.0, visionOS 2.0, *)
     func decode(_: UInt128.Type) throws -> UInt128 {
         try decodeInteger()
     }
-    #endif
 
     func decode<T: Decodable>(_ type: T.Type) throws -> T {
         return try unbox(topValue, as: type, for: codingPathNode, _CodingKey?.none)
@@ -834,13 +802,11 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
         return try decodeInteger(jsonValue, forKey: key)
     }
     
-    #if compiler(>=6.0)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, macCatalyst 18.0, visionOS 2.0, *)
     func decode(_: Int128.Type, forKey key: K) throws -> Int128 {
         let jsonValue = try getValue(forKey: key)
         return try decodeInteger(jsonValue, forKey: key)
     }
-    #endif
     
     func decodeIfPresent(_: Int64.Type, forKey key: K) throws -> Int64? {
         guard let jsonValue = getValueIfPresent(forKey: key) else {
@@ -902,13 +868,11 @@ private final class DefaultKeyedDecodingContainer<K: CodingKey>: KeyedDecodingCo
         return try decodeInteger(jsonValue, forKey: key)
     }
   
-    #if compiler(>=6.0)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, macCatalyst 18.0, visionOS 2.0, *)
     func decode(_: UInt128.Type, forKey key: K) throws -> UInt128 {
         let jsonValue = try getValue(forKey: key)
         return try decodeInteger(jsonValue, forKey: key)
     }
-    #endif
 
     func decodeIfPresent(_: UInt64.Type, forKey key: K) throws -> UInt64? {
         guard let jsonValue = getValueIfPresent(forKey: key) else {
@@ -1207,13 +1171,11 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
         return try decodeInteger(jsonValue, forKey: key)
     }
   
-    #if compiler(>=6.0)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, macCatalyst 18.0, visionOS 2.0, *)
     func decode(_: Int128.Type, forKey key: K) throws -> Int128 {
         let jsonValue = try getValue(forKey: key)
         return try decodeInteger(jsonValue, forKey: key)
     }
-    #endif
 
     func decodeIfPresent(_: Int64.Type, forKey key: K) throws -> Int64? {
         guard let jsonValue = getValueIfPresent(forKey: key) else {
@@ -1275,13 +1237,11 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
         return try decodeInteger(jsonValue, forKey: key)
     }
   
-    #if compiler(>=6.0)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, macCatalyst 18.0, visionOS 2.0, *)
     func decode(_: UInt128.Type, forKey key: K) throws -> UInt128 {
         let jsonValue = try getValue(forKey: key)
         return try decodeInteger(jsonValue, forKey: key)
     }
-    #endif
 
     func decodeIfPresent(_: UInt64.Type, forKey key: K) throws -> UInt64? {
         guard let jsonValue = getValueIfPresent(forKey: key) else {
@@ -1561,13 +1521,11 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
         return try decodeInteger(value)
     }
   
-    #if compiler(>=6.0)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, macCatalyst 18.0, visionOS 2.0, *)
     mutating func decode(_: Int128.Type) throws -> Int128 {
         let value = try valueFromIterator(ofType: Int128.self)
         return try decodeInteger(value)
     }
-    #endif
 
     mutating func decode(_: UInt.Type) throws -> UInt {
         let value = try valueFromIterator(ofType: UInt.self)
@@ -1594,13 +1552,11 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
         return try decodeInteger(value)
     }
   
-    #if compiler(>=6.0)
-    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, macCatalyst 18.0, visionOS 2.0, *)
     mutating func decode(_: UInt128.Type) throws -> UInt128 {
         let value = try valueFromIterator(ofType: UInt.self)
         return try decodeInteger(value)
     }
-    #endif
 
     mutating func decode<T: Decodable>(_ type: T.Type) throws -> T {
         let value = try valueFromIterator(ofType: type)

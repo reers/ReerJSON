@@ -738,36 +738,73 @@ class ValueInPlaceTests: XCTestCase {
 }
 
 // MARK: - JSONDocument Tests
+
+private extension JSONDocument {
+    borrowing func objectString(forKey key: String) throws -> String? {
+        try withRootValue { root in
+            root.withObject { object in
+                object.withValue(forKey: key) { value in
+                    value.string ?? ""
+                }
+            } ?? nil
+        }
+    }
+
+    borrowing func objectNumber(forKey key: String) throws -> Double? {
+        try withRootValue { root in
+            root.withObject { object in
+                object.withValue(forKey: key) { value in
+                    value.number ?? .nan
+                }
+            } ?? nil
+        }
+    }
+
+    borrowing func rootArrayCount() throws -> Int? {
+        try withRootValue { root in
+            root.withArray { array in
+                array.count
+            }
+        }
+    }
+
+    borrowing func rootArrayNumber(at index: Int) throws -> Double? {
+        try withRootValue { root in
+            root.withArray { array in
+                array.withElement(at: index) { value in
+                    value.number ?? .nan
+                }
+            } ?? nil
+        }
+    }
+}
+
 class JSONDocumentInitTests: XCTestCase {
     func testInitFromData() throws {
         let json = #"{"name": "Alice", "age": 30}"#
         let data = json.data(using: .utf8)!
         let document = try JSONDocument(data: data)
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?["name"]?.string, "Alice")
-        XCTAssertEqual(document.root?["age"]?.number, 30.0)
+        XCTAssertEqual(try document.objectString(forKey: "name"), "Alice")
+        XCTAssertEqual(try document.objectNumber(forKey: "age"), 30.0)
     }
 
     func testInitFromString() throws {
         let json = #"{"key": "value"}"#
         let document = try JSONDocument(string: json)
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?["key"]?.string, "value")
+        XCTAssertEqual(try document.objectString(forKey: "key"), "value")
     }
 
     func testInitFromDataWithOptions() throws {
         let json = #"{"key": "value"}"#
         let data = json.data(using: .utf8)!
         let document = try JSONDocument(data: data, options: .default)
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?["key"]?.string, "value")
+        XCTAssertEqual(try document.objectString(forKey: "key"), "value")
     }
 
     func testInitFromStringWithOptions() throws {
         let json = #"{"key": "value"}"#
         let document = try JSONDocument(string: json, options: .default)
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?["key"]?.string, "value")
+        XCTAssertEqual(try document.objectString(forKey: "key"), "value")
     }
 
     func testInitFromEmptyData() throws {
@@ -803,9 +840,8 @@ class JSONDocumentInitTests: XCTestCase {
         let json = #"{"name": "test", "value": 42}"#
         var data = json.data(using: .utf8)!
         let document = try JSONDocument(parsingInPlace: &data)
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?["name"]?.string, "test")
-        XCTAssertEqual(document.root?["value"]?.number, 42.0)
+        XCTAssertEqual(try document.objectString(forKey: "name"), "test")
+        XCTAssertEqual(try document.objectNumber(forKey: "value"), 42.0)
     }
 
     func testParsingInPlaceEmptyData() throws {
@@ -830,59 +866,74 @@ class JSONDocumentInitTests: XCTestCase {
 }
 
 class JSONDocumentRootTests: XCTestCase {
-    func testRootProperty() throws {
+    func testBorrowedRootLookup() throws {
         let document = try JSONDocument(string: #"{"key": "value"}"#)
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?["key"]?.string, "value")
+        XCTAssertEqual(try document.objectString(forKey: "key"), "value")
     }
 
-    func testRootObjectProperty() throws {
+    func testBorrowedRootObject() throws {
         let document = try JSONDocument(string: #"{"key": "value"}"#)
-        XCTAssertNotNil(document.rootObject)
-        XCTAssertEqual(document.rootObject?["key"]?.string, "value")
+        let isObject = try document.withRootValue { root in
+            root.withObject { _ in true } ?? false
+        }
+        XCTAssertTrue(isObject)
+        XCTAssertEqual(try document.objectString(forKey: "key"), "value")
     }
 
-    func testRootArrayProperty() throws {
+    func testBorrowedRootArray() throws {
         let document = try JSONDocument(string: "[1, 2, 3]")
-        XCTAssertNotNil(document.rootArray)
-        XCTAssertEqual(document.rootArray?.count, 3)
-        XCTAssertEqual(document.rootArray?[0]?.number, 1.0)
+        XCTAssertEqual(try document.rootArrayCount(), 3)
+        XCTAssertEqual(try document.rootArrayNumber(at: 0), 1.0)
     }
 
     func testRootObjectOnArray() throws {
         let document = try JSONDocument(string: "[1, 2, 3]")
-        XCTAssertNil(document.rootObject)
+        let isObject = try document.withRootValue { root in
+            root.withObject { _ in true } ?? false
+        }
+        XCTAssertFalse(isObject)
     }
 
     func testRootArrayOnObject() throws {
         let document = try JSONDocument(string: #"{"key": "value"}"#)
-        XCTAssertNil(document.rootArray)
+        XCTAssertNil(try document.rootArrayCount())
     }
 
     func testRootOnPrimitive() throws {
         let document = try JSONDocument(string: "42")
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?.number, 42.0)
-        XCTAssertNil(document.rootObject)
-        XCTAssertNil(document.rootArray)
+        let number = try document.withRootValue { root in
+            root.number
+        }
+        let isObject = try document.withRootValue { root in
+            root.withObject { _ in true } ?? false
+        }
+        XCTAssertEqual(number, 42.0)
+        XCTAssertFalse(isObject)
+        XCTAssertNil(try document.rootArrayCount())
     }
 
     func testRootOnString() throws {
         let document = try JSONDocument(string: #""hello""#)
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?.string, "hello")
+        let string = try document.withRootValue { root in
+            root.string
+        }
+        XCTAssertEqual(string, "hello")
     }
 
     func testRootOnNull() throws {
         let document = try JSONDocument(string: "null")
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?.isNull, true)
+        let isNull = try document.withRootValue { root in
+            root.isNull
+        }
+        XCTAssertTrue(isNull)
     }
 
     func testRootOnBool() throws {
         let document = try JSONDocument(string: "true")
-        XCTAssertNotNil(document.root)
-        XCTAssertEqual(document.root?.bool, true)
+        let bool = try document.withRootValue { root in
+            root.bool
+        }
+        XCTAssertEqual(bool, true)
     }
 
     func testBorrowedRootObjectLookup() throws {
@@ -926,18 +977,16 @@ class JSONDocumentRootTests: XCTestCase {
         XCTAssertEqual(values, [1, 2, 3])
     }
 
-    func testUniqueDocumentBorrowedRootValue() throws {
-        if #available(macOS 27.0, iOS 27.0, tvOS 27.0, watchOS 27.0, macCatalyst 27.0, visionOS 27.0, *) {
-            let document = try JSONUniqueDocument(string: #"{"enabled":true}"#)
-            let enabled = try document.withRootValue { root in
-                root.withObject { object in
-                    object.withValue(forKey: "enabled") { value in
-                        value.bool ?? false
-                    } ?? false
+    func testDocumentStorageBorrowedRootValue() throws {
+        let document = try JSONDocument(string: #"{"enabled":true}"#)
+        let enabled = try document.withRootValue { root in
+            root.withObject { object in
+                object.withValue(forKey: "enabled") { value in
+                    value.bool ?? false
                 } ?? false
-            }
-            XCTAssertTrue(enabled)
+            } ?? false
         }
+        XCTAssertTrue(enabled)
     }
 }
 
@@ -953,18 +1002,51 @@ class JSONDocumentComplexTests: XCTestCase {
             }
             """
         let document = try JSONDocument(string: json)
-        guard let root = document.root else {
-            XCTFail("Expected root")
-            return
+        try document.withRootValue { root in
+            try root.withObject { object in
+                let usersCount = try object.withValue(forKey: "users") { usersValue in
+                    usersValue.withArray { users in
+                        users.count
+                    } ?? 0
+                } ?? 0
+                XCTAssertEqual(usersCount, 2)
+
+                let firstName = try object.withValue(forKey: "users") { usersValue in
+                    try usersValue.withArray { users in
+                        try users.withElement(at: 0) { user in
+                            user.withObject { userObject in
+                                userObject.withValue(forKey: "name") { name in
+                                    name.string ?? ""
+                                } ?? ""
+                            } ?? ""
+                        } ?? ""
+                    } ?? ""
+                } ?? ""
+                XCTAssertEqual(firstName, "Alice")
+
+                let secondName = try object.withValue(forKey: "users") { usersValue in
+                    try usersValue.withArray { users in
+                        try users.withElement(at: 1) { user in
+                            user.withObject { userObject in
+                                userObject.withValue(forKey: "name") { name in
+                                    name.string ?? ""
+                                } ?? ""
+                            } ?? ""
+                        } ?? ""
+                    } ?? ""
+                } ?? ""
+                XCTAssertEqual(secondName, "Bob")
+
+                let count = try object.withValue(forKey: "meta") { meta in
+                    meta.withObject { metaObject in
+                        metaObject.withValue(forKey: "count") { count in
+                            count.number ?? .nan
+                        } ?? .nan
+                    } ?? .nan
+                } ?? .nan
+                XCTAssertEqual(count, 2.0)
+            }
         }
-        guard let users = root["users"]?.array else {
-            XCTFail("Expected users array")
-            return
-        }
-        XCTAssertEqual(users.count, 2)
-        XCTAssertEqual(users[0]?["name"]?.string, "Alice")
-        XCTAssertEqual(users[1]?["name"]?.string, "Bob")
-        XCTAssertEqual(root["meta"]?["count"]?.number, 2.0)
     }
 
     func testLargeDocument() throws {
@@ -974,13 +1056,9 @@ class JSONDocumentComplexTests: XCTestCase {
         }
         let json = "[\(elements.joined(separator: ", "))]"
         let document = try JSONDocument(string: json)
-        guard let array = document.rootArray else {
-            XCTFail("Expected array")
-            return
-        }
-        XCTAssertEqual(array.count, 100)
-        XCTAssertEqual(array[0]?.number, 0.0)
-        XCTAssertEqual(array[99]?.number, 99.0)
+        XCTAssertEqual(try document.rootArrayCount(), 100)
+        XCTAssertEqual(try document.rootArrayNumber(at: 0), 0.0)
+        XCTAssertEqual(try document.rootArrayNumber(at: 99), 99.0)
     }
 }
 

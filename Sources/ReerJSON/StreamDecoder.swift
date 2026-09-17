@@ -207,7 +207,6 @@ struct ByteChunkBuffer: Sendable {
 }
 
 /// An `AsyncSequence` that yields ``JSONValue`` items from chunks of `Data`.
-@available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 public struct JSONValueStream<Source: AsyncSequence & Sendable>: AsyncSequence, Sendable
 where Source.Element == Data {
     public typealias Element = JSONValue
@@ -261,7 +260,6 @@ where Source.Element == Data {
 }
 
 /// An `AsyncSequence` that yields ``JSONValue`` items from an `AsyncSequence` of bytes.
-@available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 public struct JSONValueByteStream<Source: AsyncSequence & Sendable>: AsyncSequence, Sendable
 where Source.Element == UInt8 {
     public typealias Element = JSONValue
@@ -344,7 +342,6 @@ where Source.Element == UInt8 {
 ///
 /// Internally this decodes values already parsed by ``JSONStreamParser``,
 /// skipping the serialization and reparse round-trip.
-@available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 public struct DecodingStream<T: Decodable & Sendable, Source: AsyncSequence & Sendable>:
     AsyncSequence, Sendable
 where Source.Element == Data {
@@ -420,7 +417,6 @@ where Source.Element == Data {
 
 // MARK: - AsyncSequence Extensions
 
-@available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 extension AsyncSequence where Element == Data, Self: Sendable {
 
     /// Returns an `AsyncSequence` of ``JSONValue`` items parsed from this
@@ -458,7 +454,6 @@ extension AsyncSequence where Element == Data, Self: Sendable {
     }
 }
 
-@available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 extension AsyncSequence where Element == UInt8, Self: Sendable {
 
     /// Returns an `AsyncSequence` of ``JSONValue`` items parsed from this

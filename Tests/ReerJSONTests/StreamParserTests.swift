@@ -345,7 +345,14 @@ final class JSONIncrementalReaderTests: XCTestCase {
     func testSingleChunk() throws {
         let reader = try JSONIncrementalReader(data: Data("{\"key\":\"value\"}".utf8))
         let doc = try reader.finish()
-        XCTAssertEqual(doc.root?["key"]?.string, "value")
+        let value = try doc.withRootValue { root in
+            root.withObject { object in
+                object.withValue(forKey: "key") { value in
+                    value.string ?? ""
+                } ?? ""
+            } ?? ""
+        }
+        XCTAssertEqual(value, "value")
     }
 
     func testMultipleChunks() throws {
@@ -353,14 +360,22 @@ final class JSONIncrementalReaderTests: XCTestCase {
         // First feed should need more data.
         switch try reader.feed(Data("y\":\"val".utf8)) {
         case .ready(let doc):
-            XCTFail("Should need more data, got doc with root: \(String(describing: doc.root))")
+            let isNull = try doc.withRootValue { root in root.isNull }
+            XCTFail("Should need more data, got doc; root is null: \(isNull)")
         case .needMoreData:
             break
         }
         // Second feed should complete.
         switch try reader.feed(Data("ue\"}".utf8)) {
         case .ready(let doc):
-            XCTAssertEqual(doc.root?["key"]?.string, "value")
+            let value = try doc.withRootValue { root in
+                root.withObject { object in
+                    object.withValue(forKey: "key") { value in
+                        value.string ?? ""
+                    } ?? ""
+                } ?? ""
+            }
+            XCTAssertEqual(value, "value")
         case .needMoreData:
             XCTFail("Should have completed parsing")
         }
@@ -384,7 +399,12 @@ final class JSONIncrementalReaderTests: XCTestCase {
             let chunk = Data(jsonData[offset..<end])
             switch try reader.feed(chunk) {
             case .ready(let doc):
-                XCTAssertEqual(doc.rootArray?.count, 100)
+                let count = try doc.withRootValue { root in
+                    root.withArray { array in
+                        array.count
+                    }
+                }
+                XCTAssertEqual(count, 100)
                 parsed = true
                 break feedLoop
             case .needMoreData:
@@ -394,7 +414,12 @@ final class JSONIncrementalReaderTests: XCTestCase {
         }
         if !parsed {
             let doc = try reader.finish()
-            XCTAssertEqual(doc.rootArray?.count, 100)
+            let count = try doc.withRootValue { root in
+                root.withArray { array in
+                    array.count
+                }
+            }
+            XCTAssertEqual(count, 100)
         }
     }
 
@@ -466,7 +491,8 @@ final class JSONIncrementalReaderTests: XCTestCase {
         // Best-effort: either we've already finished, or finish() completes it.
         do {
             let doc = try reader.finish()
-            XCTAssertNotNil(doc.root)
+            let hasRoot = try doc.withRootValue { _ in true }
+            XCTAssertTrue(hasRoot)
         } catch {
             // Race may have finished it via feed(); that's also acceptable.
         }
@@ -743,8 +769,8 @@ final class AsyncStreamTests: XCTestCase {
             return bytes[index]
         }
 
-        let firstData = buffer.withUnsafeBufferPointer(byteCount: first.byteCount) {
-            Data(buffer: $0)
+        let firstData = buffer.withUnsafeBufferPointer(byteCount: first.byteCount) { bytes in
+            Data(buffer: bytes)
         }
         XCTAssertEqual(firstData, Data("abcd".utf8))
         XCTAssertFalse(first.reachedEnd)
@@ -756,8 +782,8 @@ final class AsyncStreamTests: XCTestCase {
             return bytes[index]
         }
 
-        let secondData = buffer.withUnsafeBufferPointer(byteCount: second.byteCount) {
-            Data(buffer: $0)
+        let secondData = buffer.withUnsafeBufferPointer(byteCount: second.byteCount) { bytes in
+            Data(buffer: bytes)
         }
         XCTAssertEqual(secondData, Data("ef".utf8))
         XCTAssertTrue(second.reachedEnd)
@@ -775,8 +801,8 @@ final class AsyncStreamTests: XCTestCase {
             return bytes[index]
         }
 
-        let firstData = buffer.withUnsafeBufferPointer(byteCount: first.byteCount) {
-            Data(buffer: $0)
+        let firstData = buffer.withUnsafeBufferPointer(byteCount: first.byteCount) { bytes in
+            Data(buffer: bytes)
         }
         XCTAssertEqual(firstData, Data("a".utf8))
         XCTAssertFalse(first.reachedEnd)

@@ -201,6 +201,97 @@ import yyjson
 // MARK: - Helper Functions
 
 @inline(__always)
+func yyReadDocument(
+    from buffer: UnsafeRawBufferPointer,
+    flags: yyjson_read_flag
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    guard let baseAddress = buffer.baseAddress else { return nil }
+    let pointer = UnsafeMutablePointer(
+        mutating: baseAddress.assumingMemoryBound(to: CChar.self)
+    )
+    return yyjson_read(pointer, buffer.count, flags)
+}
+
+@inline(__always)
+func yyReadDocument(
+    from buffer: UnsafeRawBufferPointer,
+    flags: yyjson_read_flag,
+    error: inout yyjson_read_err
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    guard let baseAddress = buffer.baseAddress else { return nil }
+    let pointer = UnsafeMutablePointer(
+        mutating: baseAddress.assumingMemoryBound(to: CChar.self)
+    )
+    return yyjson_read_opts(pointer, buffer.count, flags, nil, &error)
+}
+
+@inline(__always)
+func yyReadDocument(
+    mutating buffer: UnsafeMutableRawBufferPointer,
+    validByteCount: Int,
+    flags: yyjson_read_flag
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    guard let baseAddress = buffer.baseAddress else { return nil }
+    let pointer = baseAddress.assumingMemoryBound(to: CChar.self)
+    return yyjson_read(pointer, validByteCount, flags)
+}
+
+@inline(__always)
+func yyReadDocument(
+    mutating buffer: UnsafeMutableRawBufferPointer,
+    validByteCount: Int,
+    flags: yyjson_read_flag,
+    error: inout yyjson_read_err
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    guard let baseAddress = buffer.baseAddress else { return nil }
+    let pointer = baseAddress.assumingMemoryBound(to: CChar.self)
+    return yyjson_read_opts(pointer, validByteCount, flags, nil, &error)
+}
+
+@inline(__always)
+func yyReadDocument(
+    from data: Data,
+    flags: yyjson_read_flag
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    data.withUnsafeBytes { buffer in
+        yyReadDocument(from: buffer, flags: flags)
+    }
+}
+
+@inline(__always)
+func yyReadDocument(
+    from data: Data,
+    flags: yyjson_read_flag,
+    error: inout yyjson_read_err
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    data.withUnsafeBytes { buffer in
+        yyReadDocument(from: buffer, flags: flags, error: &error)
+    }
+}
+
+@inline(__always)
+func yyReadDocument(
+    from bytes: RawSpan,
+    flags: yyjson_read_flag
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    bytes.withUnsafeBytes { buffer in
+        yyReadDocument(from: buffer, flags: flags)
+    }
+}
+
+@inline(__always)
+func yyReadDocument(
+    from bytes: RawSpan,
+    flags: yyjson_read_flag,
+    error: inout yyjson_read_err
+) -> UnsafeMutablePointer<yyjson_doc>? {
+    bytes.withUnsafeBytes { buffer in
+        yyReadDocument(from: buffer, flags: flags, error: &error)
+    }
+}
+
+@usableFromInline
+@inline(__always)
 func yyObjGet(
     _ obj: UnsafeMutablePointer<yyjson_val>,
     key: String

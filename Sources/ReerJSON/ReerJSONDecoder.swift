@@ -200,13 +200,7 @@ open class ReerJSONDecoder {
         if options.json5 {
             flag |= YYJSON_READ_JSON5
         }
-        let doc = data.withUnsafeBytes {
-            yyjson_read(
-                $0.bindMemory(to: CChar.self).baseAddress,
-                data.count,
-                flag
-            )
-        }
+        let doc = yyReadDocument(from: data, flags: flag)
         guard let doc else {
             return try decodeWithFoundationDecoder(type, from: data, options: options)
         }
@@ -274,13 +268,7 @@ open class ReerJSONDecoder {
         if options.json5 {
             flag |= YYJSON_READ_JSON5
         }
-        let doc = data.withUnsafeBytes {
-            yyjson_read(
-                $0.bindMemory(to: CChar.self).baseAddress,
-                data.count,
-                flag
-            )
-        }
+        let doc = yyReadDocument(from: data, flags: flag)
         guard let doc else {
             if #available(macOS 14, iOS 17, tvOS 17, watchOS 10, visionOS 1, *) {
                 return try decodeWithFoundationDecoder(type, from: data, options: options, configuration: configuration)

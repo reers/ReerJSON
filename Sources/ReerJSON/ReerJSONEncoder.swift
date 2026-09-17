@@ -210,7 +210,7 @@ open class ReerJSONEncoder {
         
         yyjson_mut_doc_set_root(doc, root)
         
-        var writeFlag: yyjson_write_flag = YYJSON_WRITE_NOFLAG
+        var writeFlag: yyjson_write_flag = YYJSON_WRITE_NOFLAG | YYJSON_WRITE_LOWERCASE_HEX
         if outputFormatting.contains(.prettyPrinted) {
             writeFlag |= YYJSON_WRITE_PRETTY_TWO_SPACES
         }
@@ -258,7 +258,7 @@ open class ReerJSONEncoder {
         
         yyjson_mut_doc_set_root(doc, root)
         
-        var writeFlag: yyjson_write_flag = YYJSON_WRITE_NOFLAG
+        var writeFlag: yyjson_write_flag = YYJSON_WRITE_NOFLAG | YYJSON_WRITE_LOWERCASE_HEX
         if outputFormatting.contains(.prettyPrinted) {
             writeFlag |= YYJSON_WRITE_PRETTY_TWO_SPACES
         }

@@ -1,5 +1,5 @@
 {
-  "originHash" : "964ba52f829bb58fb4b43448757fcca80c913ab20421daf38960b43ef5193aec",
+  "originHash" : "f4259d698bd2a4bf6e5cb962584725aa468558ac60d9ae5d972c11d206738acf",
   "pins" : [
     {
       "identity" : "jjliso8601dateformatter",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ibireme/yyjson.git",
       "state" : {
-        "revision" : "8b4a38dc994a110abaec8a400615567bd996105f",
-        "version" : "0.12.0"
+        "revision" : "6447536015f3d600f3d65323b10976103b337ca7",
+        "version" : "0.13.0"
       }
     }
   ],

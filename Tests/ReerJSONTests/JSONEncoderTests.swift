@@ -1159,7 +1159,7 @@ private struct JSONEncoderTests {
     @Test func encodingJSONHexUnicodeEscapes() throws {
         let testCases = [
             "\u{0001}\u{0002}\u{0003}": "\"\\u0001\\u0002\\u0003\"",
-            "\u{0010}\u{0018}\u{001f}": "\"\\u0010\\u0018\\u001F\"",
+            "\u{0010}\u{0018}\u{001f}": "\"\\u0010\\u0018\\u001f\"",
         ]
         for (string, json) in testCases {
             _testRoundTrip(of: string, expectedJSON: Data(json.utf8))

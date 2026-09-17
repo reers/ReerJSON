@@ -55,7 +55,7 @@ Mac Catalyst 15, and visionOS 1.
 
 Add dependency in `Package.swift` or project `Package Dependencies`
 ```swift
-.package(url: "https://github.com/reers/ReerJSON.git", from: "1.1.0"),
+.package(url: "https://github.com/reers/ReerJSON.git", from: "1.2.0"),
 ```
 
 Depend on `ReerJSON` in your target.
@@ -242,7 +242,6 @@ Except for the items listed below, ReerJSON behaves exactly the same as Foundati
 
 | Encoder Diff          | Foundation              | ReerJSON                              |
 |-----------------------|-------------------------|---------------------------------------|
-| Unicode escape casing | `\u001f` (lowercase)    | `\u001F` (uppercase). Both are valid JSON per RFC 8259 |
 | Pretty-print colon    | `"key" : value` (space before and after colon) | `"key": value` (space after colon only) |
 
 

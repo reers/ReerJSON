@@ -39,6 +39,10 @@ final class ObjectKeyIndex {
     static let threshold = 32
     private var keySets: [UnsafeMutablePointer<yyjson_mut_val>: Set<String>] = [:]
 
+    func contains(_ key: String, in object: UnsafeMutablePointer<yyjson_mut_val>) -> Bool {
+        keySets[object, default: Self.existingKeys(of: object)].contains(key)
+    }
+
     func put(
         _ key: String,
         _ value: UnsafeMutablePointer<yyjson_mut_val>,
@@ -109,6 +113,13 @@ class JSONEncoderImpl: Encoder {
         } else {
             objectKeyIndex.put(key, value, into: object, impl: self)
         }
+    }
+
+    func value(forKey key: String, in object: UnsafeMutablePointer<yyjson_mut_val>) -> UnsafeMutablePointer<yyjson_mut_val>? {
+        if yyjson_mut_obj_size(object) >= ObjectKeyIndex.threshold && !objectKeyIndex.contains(key, in: object) {
+            return nil
+        }
+        return key.withCString { yyjson_mut_obj_getn(object, $0, key.utf8.count) }
     }
 
     @inline(__always)
@@ -509,7 +520,7 @@ private struct YYJSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContaine
     }
 
     @inline(__always)
-    private func _key(_ key: Key) -> String {
+    private func _key(_ key: some CodingKey) -> String {
         useDefaultKeys ? key.stringValue : impl.convertedKey(key)
     }
 
@@ -550,8 +561,8 @@ private struct YYJSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContaine
     }
 
     mutating func nestedContainer<NestedKey: CodingKey>(keyedBy keyType: NestedKey.Type, forKey key: Key) -> KeyedEncodingContainer<NestedKey> {
-        let k = impl.convertedKey(key)
-        if let existing = k.withCString({ yyjson_mut_obj_getn(object, $0, k.utf8.count) }), yyjson_mut_is_obj(existing) {
+        let k = _key(key)
+        if let existing = impl.value(forKey: k, in: object), yyjson_mut_is_obj(existing) {
             return KeyedEncodingContainer(YYJSONKeyedEncodingContainer<NestedKey>(impl: impl, codingPath: codingPath + [key], object: existing))
         }
         let obj = yyjson_mut_obj(doc)!
@@ -560,16 +571,20 @@ private struct YYJSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContaine
     }
 
     mutating func nestedUnkeyedContainer(forKey key: Key) -> UnkeyedEncodingContainer {
+        let k = _key(key)
+        if let existing = impl.value(forKey: k, in: object), yyjson_mut_is_arr(existing) {
+            return YYJSONUnkeyedEncodingContainer(impl: impl, codingPath: codingPath + [key], array: existing)
+        }
         let arr = yyjson_mut_arr(doc)!
-        addToObject(key: impl.convertedKey(key), value: arr)
+        addToObject(key: k, value: arr)
         return YYJSONUnkeyedEncodingContainer(impl: impl, codingPath: codingPath + [key], array: arr)
     }
 
     mutating func superEncoder() -> Encoder {
-        YYJSONReferencingEncoder(impl: impl, key: impl.convertedKey(_CodingKey.super), codingPath: codingPath + [_CodingKey.super], object: object)
+        YYJSONReferencingEncoder(impl: impl, key: _key(_CodingKey.super), codingPath: codingPath + [_CodingKey.super], object: object)
     }
     mutating func superEncoder(forKey key: Key) -> Encoder {
-        YYJSONReferencingEncoder(impl: impl, key: impl.convertedKey(key), codingPath: codingPath + [key], object: object)
+        YYJSONReferencingEncoder(impl: impl, key: _key(key), codingPath: codingPath + [key], object: object)
     }
 }
 

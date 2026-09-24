@@ -293,6 +293,58 @@ struct RegressionTests {
         #expect(errorPath { try ReerJSONEncoder().encode(value) } == foundation)
     }
 
+    private struct NestedUnkeyedTwice: Encodable {
+        enum CodingKeys: String, CodingKey { case list, object }
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            var first = container.nestedUnkeyedContainer(forKey: .list)
+            try first.encode(1)
+            var second = container.nestedUnkeyedContainer(forKey: .list)
+            try second.encode(2)
+            var a = container.nestedContainer(keyedBy: CodingKeys.self, forKey: .object)
+            try a.encode(1, forKey: .list)
+            var b = container.nestedContainer(keyedBy: CodingKeys.self, forKey: .object)
+            try b.encode(2, forKey: .object)
+        }
+    }
+
+    @Test func encoderNestedUnkeyedContainerReusesExistingArray() throws {
+        let value = NestedUnkeyedTwice()
+        let options: JSONEncoder.OutputFormatting = [.sortedKeys]
+        let foundation = JSONEncoder(); foundation.outputFormatting = options
+        let reer = ReerJSONEncoder(); reer.outputFormatting = options
+        let expected = String(decoding: try foundation.encode(value), as: UTF8.self)
+        #expect(expected == #"{"list":[1,2],"object":{"list":1,"object":2}}"#)
+        let actual = String(decoding: try reer.encode(value), as: UTF8.self)
+        #expect(actual == expected)
+    }
+
+    private struct WideNestedObject: Encodable {
+        let count: Int
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: DynamicKey.self)
+            for i in 0..<count {
+                var list = container.nestedUnkeyedContainer(forKey: DynamicKey("list_\(i)"))
+                try list.encode(i)
+                var object = container.nestedContainer(keyedBy: DynamicKey.self, forKey: DynamicKey("object_\(i)"))
+                try object.encode(i, forKey: DynamicKey("v"))
+            }
+            var again = container.nestedUnkeyedContainer(forKey: DynamicKey("list_\(count - 1)"))
+            try again.encode(-1)
+        }
+    }
+
+    @Test func encoderNestedContainersScaleLinearlyWithWidth() throws {
+        let encoder = ReerJSONEncoder()
+        let smallTime = try Self.bestTime { _ = try encoder.encode(WideNestedObject(count: 500)) }
+        let largeTime = try Self.bestTime { _ = try encoder.encode(WideNestedObject(count: 4_000)) }
+        #expect(largeTime / smallTime < 24, "ratio \(largeTime / smallTime)")
+        let value = try JSONValue(data: encoder.encode(WideNestedObject(count: 100)))
+        #expect(value.object?.count == 200)
+        #expect(value["list_99"]?.array?.map(\.int64) == [99, -1])
+        #expect(value["object_42"]?["v"]?.int64 == 42)
+    }
+
     @Test func serializationWriteRejectsInvalidObjects() throws {
         let invalid = JSONError.invalidData("Invalid JSON object")
         let cases: [Any] = [

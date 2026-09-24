@@ -1016,7 +1016,7 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
             while let keyPtr = yyjson_obj_iter_next(&iter) {
                 if let keyCString = yyjson_get_str(keyPtr), let valuePtr = yyjson_obj_iter_get_val(keyPtr) {
                     let jsonKey = String(cString: keyCString)
-                    result[Self._convertFromSnakeCase(jsonKey)]._setIfNil(to: JSON(pointer: valuePtr))
+                    result[SnakeCaseKeyConverter.convertFromSnakeCase(jsonKey)]._setIfNil(to: JSON(pointer: valuePtr))
                 }
             }
         case .custom(let converter):
@@ -1343,51 +1343,6 @@ private final class PreTransformKeyedDecodingContainer<K: CodingKey>: KeyedDecod
         }
         return int
     }
-    
-    private static func _convertFromSnakeCase(_ stringKey: String) -> String {
-        guard !stringKey.isEmpty else { return stringKey }
-
-        // Find the first non-underscore character
-        guard let firstNonUnderscore = stringKey.firstIndex(where: { $0 != "_" }) else {
-            // Reached the end without finding an _
-            return stringKey
-        }
-
-        // Find the last non-underscore character
-        var lastNonUnderscore = stringKey.index(before: stringKey.endIndex)
-        while lastNonUnderscore > firstNonUnderscore && stringKey[lastNonUnderscore] == "_" {
-            stringKey.formIndex(before: &lastNonUnderscore)
-        }
-
-        let keyRange = firstNonUnderscore...lastNonUnderscore
-        let leadingUnderscoreRange = stringKey.startIndex..<firstNonUnderscore
-        let trailingUnderscoreRange = stringKey.index(after: lastNonUnderscore)..<stringKey.endIndex
-
-        let components = stringKey[keyRange].split(separator: "_")
-        let joinedString: String
-        if components.count == 1 {
-            // No underscores in key, leave the word as is - maybe already camel cased
-            joinedString = String(stringKey[keyRange])
-        } else {
-            joinedString = ([components[0].lowercased()] + components[1...].map { $0.capitalized }).joined()
-        }
-
-        // Do a cheap isEmpty check before creating and appending potentially empty strings
-        let result: String
-        if (leadingUnderscoreRange.isEmpty && trailingUnderscoreRange.isEmpty) {
-            result = joinedString
-        } else if (!leadingUnderscoreRange.isEmpty && !trailingUnderscoreRange.isEmpty) {
-            // Both leading and trailing underscores
-            result = String(stringKey[leadingUnderscoreRange]) + joinedString + String(stringKey[trailingUnderscoreRange])
-        } else if (!leadingUnderscoreRange.isEmpty) {
-            // Just leading
-            result = String(stringKey[leadingUnderscoreRange]) + joinedString
-        } else {
-            // Just trailing
-            result = joinedString + String(stringKey[trailingUnderscoreRange])
-        }
-        return result
-    }
 }
 
 // MARK: - UnkeyedDecodingContainer
@@ -1608,5 +1563,143 @@ private struct JSONUnkeyedDecodingContainer: UnkeyedDecodingContainer {
         }
         advanceToNextValue()
         return int
+    }
+}
+
+// MARK: - Snake case key conversion
+
+enum SnakeCaseKeyConverter {
+    /// Same result as `convertFromSnakeCaseReference`, with a byte-level fast
+    /// path for the common ASCII keys. Components that are not purely ASCII
+    /// letters or purely digits use the reference, since `capitalized` has
+    /// word-boundary rules of its own.
+    static func convertFromSnakeCase(_ stringKey: String) -> String {
+        var key = stringKey
+        switch key.withUTF8(fastConvert) {
+        case .unchanged: return stringKey
+        case .converted(let result): return result
+        case .unsupported: return convertFromSnakeCaseReference(stringKey)
+        }
+    }
+
+    private enum FastResult {
+        case unchanged
+        case converted(String)
+        case unsupported
+    }
+
+    private static let underscore = UInt8(ascii: "_")
+
+    private static func fastConvert(_ bytes: UnsafeBufferPointer<UInt8>) -> FastResult {
+        guard let first = bytes.firstIndex(where: { $0 != underscore }) else { return .unchanged }
+        var last = bytes.count - 1
+        while bytes[last] == underscore { last -= 1 }
+
+        var componentCount = 0
+        var index = first
+        while index <= last {
+            if bytes[index] == underscore {
+                index += 1
+                continue
+            }
+            componentCount += 1
+            var hasLetter = false, hasDigit = false
+            while index <= last && bytes[index] != underscore {
+                let byte = bytes[index]
+                if byte >= 0x80 { return .unsupported }
+                if (byte | 0x20) >= UInt8(ascii: "a") && (byte | 0x20) <= UInt8(ascii: "z") {
+                    hasLetter = true
+                } else if byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9") {
+                    hasDigit = true
+                } else {
+                    return .unsupported
+                }
+                index += 1
+            }
+            if hasLetter && hasDigit { return .unsupported }
+        }
+        // A single component (no inner underscores) is left as is.
+        if componentCount <= 1 { return .unchanged }
+
+        let result = String(unsafeUninitializedCapacity: bytes.count) { out in
+            var count = 0
+            for i in 0..<first {
+                out[count] = bytes[i]; count += 1
+            }
+            var isFirstComponent = true
+            var index = first
+            while index <= last {
+                if bytes[index] == underscore {
+                    index += 1
+                    continue
+                }
+                var isComponentStart = true
+                while index <= last && bytes[index] != underscore {
+                    let byte = bytes[index]
+                    let isLetter = byte > UInt8(ascii: "9")
+                    if isLetter {
+                        let uppercase = isComponentStart && !isFirstComponent
+                        out[count] = uppercase ? byte & ~0x20 : byte | 0x20
+                    } else {
+                        out[count] = byte
+                    }
+                    count += 1
+                    isComponentStart = false
+                    index += 1
+                }
+                isFirstComponent = false
+            }
+            for i in (last + 1)..<bytes.count {
+                out[count] = bytes[i]; count += 1
+            }
+            return count
+        }
+        return .converted(result)
+    }
+
+    /// Foundation's algorithm; the reference for `convertFromSnakeCase`.
+    static func convertFromSnakeCaseReference(_ stringKey: String) -> String {
+        guard !stringKey.isEmpty else { return stringKey }
+
+        // Find the first non-underscore character
+        guard let firstNonUnderscore = stringKey.firstIndex(where: { $0 != "_" }) else {
+            // Reached the end without finding an _
+            return stringKey
+        }
+
+        // Find the last non-underscore character
+        var lastNonUnderscore = stringKey.index(before: stringKey.endIndex)
+        while lastNonUnderscore > firstNonUnderscore && stringKey[lastNonUnderscore] == "_" {
+            stringKey.formIndex(before: &lastNonUnderscore)
+        }
+
+        let keyRange = firstNonUnderscore...lastNonUnderscore
+        let leadingUnderscoreRange = stringKey.startIndex..<firstNonUnderscore
+        let trailingUnderscoreRange = stringKey.index(after: lastNonUnderscore)..<stringKey.endIndex
+
+        let components = stringKey[keyRange].split(separator: "_")
+        let joinedString: String
+        if components.count == 1 {
+            // No underscores in key, leave the word as is - maybe already camel cased
+            joinedString = String(stringKey[keyRange])
+        } else {
+            joinedString = ([components[0].lowercased()] + components[1...].map { $0.capitalized }).joined()
+        }
+
+        // Do a cheap isEmpty check before creating and appending potentially empty strings
+        let result: String
+        if (leadingUnderscoreRange.isEmpty && trailingUnderscoreRange.isEmpty) {
+            result = joinedString
+        } else if (!leadingUnderscoreRange.isEmpty && !trailingUnderscoreRange.isEmpty) {
+            // Both leading and trailing underscores
+            result = String(stringKey[leadingUnderscoreRange]) + joinedString + String(stringKey[trailingUnderscoreRange])
+        } else if (!leadingUnderscoreRange.isEmpty) {
+            // Just leading
+            result = String(stringKey[leadingUnderscoreRange]) + joinedString
+        } else {
+            // Just trailing
+            result = joinedString + String(stringKey[trailingUnderscoreRange])
+        }
+        return result
     }
 }

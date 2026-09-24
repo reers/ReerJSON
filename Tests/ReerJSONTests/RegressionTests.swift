@@ -422,6 +422,47 @@ struct RegressionTests {
         #expect(try decoder.decode([Int].self, from: Data("[+1, 0x1F, -0x10, 10,]".utf8)) == [1, 31, -16, 10])
     }
 
+    // MARK: - Decoder snake case
+
+    private struct AllKeys: Decodable {
+        let keys: [String: Int]
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: DynamicKey.self)
+            var keys: [String: Int] = [:]
+            for key in container.allKeys { keys[key.stringValue] = try container.decode(Int.self, forKey: key) }
+            self.keys = keys
+        }
+    }
+
+    @Test func decoderSnakeCaseConversionMatchesFoundation() throws {
+        let jsonKeys = [
+            "", "_", "___", "a", "already", "alreadyCamel", "ALLCAPS", "snake_case", "ALL_CAPS", "mixed_CaseWORD",
+            "_leading", "trailing_", "__both__", "a__b", "a_b_c_d", "with_1_digit", "v2_api", "x_2x", "one_22_333",
+            "ünïcode_kéy", "ß_straße", "emoji_😀_key", "dash-word_other", "dot.word_other", "space word_x",
+            "_mixed_Leading", "trailing_Mixed__", "i_d", "url_i_d", "html_url", "a_", "_a", "__a", "a__",
+        ]
+        let json = "{" + jsonKeys.enumerated().map { "\"\($1)\":\($0)" }.joined(separator: ",") + "}"
+        let data = Data(json.utf8)
+        let foundation = JSONDecoder(); foundation.keyDecodingStrategy = .convertFromSnakeCase
+        let reer = ReerJSONDecoder(); reer.keyDecodingStrategy = .convertFromSnakeCase
+        let expected = try foundation.decode(AllKeys.self, from: data).keys
+        let actual = try reer.decode(AllKeys.self, from: data).keys
+        #expect(actual == expected)
+    }
+
+    @Test func snakeCaseFastPathMatchesReference() {
+        let alphabet: [Character] = ["a", "B", "z", "Z", "_", "_", "_", "0", "9", "-", ".", "é"]
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<20_000 {
+            let length = Int.random(in: 0...12, using: &generator)
+            let key = String((0..<length).map { _ in alphabet.randomElement(using: &generator)! })
+            let expected = SnakeCaseKeyConverter.convertFromSnakeCaseReference(key)
+            let actual = SnakeCaseKeyConverter.convertFromSnakeCase(key)
+            #expect(actual == expected, "\(key)")
+            if actual != expected { break }
+        }
+    }
+
     @Test func serializationWriteRejectsInvalidObjects() throws {
         let invalid = JSONError.invalidData("Invalid JSON object")
         let cases: [Any] = [

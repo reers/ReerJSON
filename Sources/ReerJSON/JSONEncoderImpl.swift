@@ -432,8 +432,9 @@ class JSONEncoderImpl: Encoder {
 
     // MARK: - Key encoding strategy
 
+    /// - Parameter codingPath: The path of the container that owns `key`.
     @inline(__always)
-    func convertedKey(_ key: CodingKey) -> String {
+    func convertedKey(_ key: CodingKey, in codingPath: [CodingKey]) -> String {
         switch options.keyEncodingStrategy {
         case .useDefaultKeys: return key.stringValue
         case .convertToSnakeCase: return Self._convertToSnakeCase(key.stringValue)
@@ -521,7 +522,7 @@ private struct YYJSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContaine
 
     @inline(__always)
     private func _key(_ key: some CodingKey) -> String {
-        useDefaultKeys ? key.stringValue : impl.convertedKey(key)
+        useDefaultKeys ? key.stringValue : impl.convertedKey(key, in: codingPath)
     }
 
     @inline(__always)

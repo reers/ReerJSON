@@ -345,6 +345,40 @@ struct RegressionTests {
         #expect(value["object_42"]?["v"]?.int64 == 42)
     }
 
+    private struct DeeplyKeyed: Encodable {
+        enum CodingKeys: String, CodingKey { case outer, inner, leaf }
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            var outer = container.nestedContainer(keyedBy: CodingKeys.self, forKey: .outer)
+            var inner = outer.nestedContainer(keyedBy: CodingKeys.self, forKey: .inner)
+            try inner.encode(1, forKey: .leaf)
+            var list = outer.nestedUnkeyedContainer(forKey: .leaf)
+            var element = list.nestedContainer(keyedBy: CodingKeys.self)
+            try element.encode(2, forKey: .leaf)
+        }
+    }
+
+    @Test func encoderCustomKeyStrategyReceivesFullCodingPath() throws {
+        func paths(_ encode: (@escaping @Sendable ([CodingKey]) -> CodingKey) throws -> Void) rethrows -> [String] {
+            let seen = LockedState<[String]>(initialState: [])
+            try encode { path in
+                seen.withLock { $0.append(path.map { $0.intValue.map(String.init) ?? $0.stringValue }.joined(separator: ".")) }
+                return path.last!
+            }
+            return seen.withLock { $0 }
+        }
+        let foundation = try paths { converter in
+            let encoder = JSONEncoder(); encoder.keyEncodingStrategy = .custom(converter)
+            _ = try encoder.encode(DeeplyKeyed())
+        }
+        let reer = try paths { converter in
+            let encoder = ReerJSONEncoder(); encoder.keyEncodingStrategy = .custom(converter)
+            _ = try encoder.encode(DeeplyKeyed())
+        }
+        #expect(foundation.sorted() == ["outer", "outer.inner", "outer.inner.leaf", "outer.leaf", "outer.leaf.0.leaf"])
+        #expect(reer.sorted() == foundation.sorted())
+    }
+
     @Test func serializationWriteRejectsInvalidObjects() throws {
         let invalid = JSONError.invalidData("Invalid JSON object")
         let cases: [Any] = [

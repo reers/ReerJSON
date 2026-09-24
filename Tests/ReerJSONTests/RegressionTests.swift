@@ -136,4 +136,73 @@ struct RegressionTests {
         data.append(Self.ndjson(count: 10))
         #expect(throws: JSONError.self) { try parser.parse(data) }
     }
+
+    // MARK: - ReerJSONSerialization writing
+
+    @Test func serializationWriteScalesLinearlyWithDictionaryWidth() throws {
+        func dictionary(_ count: Int) -> NSDictionary {
+            let dict = NSMutableDictionary()
+            for i in 0..<count { dict["key_\(i)"] = i }
+            return dict
+        }
+        let small = dictionary(1_000), large = dictionary(8_000)
+        let smallTime = try Self.bestTime { _ = try ReerJSONSerialization.data(withJSONObject: small) }
+        let largeTime = try Self.bestTime { _ = try ReerJSONSerialization.data(withJSONObject: large) }
+        // 8x the keys: linear ≈ 8x, quadratic ≈ 64x.
+        #expect(largeTime / smallTime < 24, "ratio \(largeTime / smallTime)")
+    }
+
+    @Test func serializationWriteMatchesFoundationOutput() throws {
+        let object: [String: Any] = [
+            "string": "héllo \"world\" / \u{1F600}",
+            "int": -42,
+            "uint64": UInt64.max,
+            "double": 3.25,
+            "bool": true,
+            "false": false,
+            "null": NSNull(),
+            "array": [1, "two", 3.5, false, NSNull(), ["nested": [1, 2]]],
+            "dict": ["a": ["b": ["c": "d"]]],
+            "empty": [String: Any](),
+            "emptyArray": [Any](),
+            "nsstring": NSString(string: "bridged"),
+            "nsnumber": NSNumber(value: Int8(-3)),
+            "mutable": NSMutableString(string: "mut ü"),
+            "long": String(repeating: "长字符串", count: 100),
+        ]
+        for options: ReerJSONSerialization.WritingOptions in [[.sortedKeys], [.sortedKeys, .withoutEscapingSlashes]] {
+            let foundationOptions: JSONSerialization.WritingOptions =
+                options.contains(.withoutEscapingSlashes) ? [.sortedKeys, .withoutEscapingSlashes] : [.sortedKeys]
+            let reer = try ReerJSONSerialization.data(withJSONObject: object, options: options)
+            let foundation = try JSONSerialization.data(withJSONObject: object, options: foundationOptions)
+            #expect(String(decoding: reer, as: UTF8.self) == String(decoding: foundation, as: UTF8.self))
+        }
+    }
+
+    @Test func serializationWriteReplacesUnpairedSurrogates() throws {
+        var units: [unichar] = [0x61, 0xD800, 0x62]
+        let lone = NSString(characters: &units, length: units.count)
+        let data = try ReerJSONSerialization.data(withJSONObject: [lone] as NSArray)
+        #expect(String(decoding: data, as: UTF8.self) == "[\"a\u{FFFD}b\"]")
+    }
+
+    @Test func serializationWriteRejectsInvalidObjects() throws {
+        let invalid = JSONError.invalidData("Invalid JSON object")
+        let cases: [Any] = [
+            ["a": Double.nan] as NSDictionary,
+            ["a": [1, Double.infinity]] as NSDictionary,
+            [["a": ["b": Float.nan]]] as NSArray,
+            [1: "non-string key"] as NSDictionary,
+            ["a": [2: 1]] as NSDictionary,
+            ["a": Date()] as NSDictionary,
+            [Data()] as NSArray,
+        ]
+        for object in cases {
+            #expect(throws: invalid) { try ReerJSONSerialization.data(withJSONObject: object) }
+            #expect(!ReerJSONSerialization.isValidJSONObject(object))
+        }
+        #expect(try ReerJSONSerialization.data(
+            withJSONObject: ["a": [Double.nan]] as NSDictionary, options: .infAndNaNAsNull
+        ) == Data(#"{"a":[null]}"#.utf8))
+    }
 }

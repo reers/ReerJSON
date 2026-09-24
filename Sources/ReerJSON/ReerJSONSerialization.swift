@@ -152,16 +152,16 @@ public enum ReerJSONSerialization {
             options.contains(.infAndNaNAsNull)
             || options.contains(.allowInfAndNaN)
 
-        if isTopLevelContainer {
-            guard isValidJSONObject(obj, allowNonFiniteNumbers: allowNonFiniteNumbers) else {
-                throw JSONError.invalidData("Invalid JSON object")
-            }
-        } else if isFragment {
+        // Containers are validated while they are converted.
+        if isFragment {
             guard options.contains(.fragmentsAllowed) else {
                 throw JSONError.invalidData("Top-level JSON value must be an array or dictionary")
             }
-        } else {
-            throw JSONError.invalidData("Invalid JSON object")
+            if !allowNonFiniteNumbers, let number = obj as? NSNumber, !number.doubleValue.isFinite {
+                throw JSONError.invalidData("NaN or Infinity not allowed in JSON")
+            }
+        } else if !isTopLevelContainer {
+            throw invalidObjectError
         }
 
         guard let doc = yyjson_mut_doc_new(nil) else {
@@ -232,13 +232,6 @@ public enum ReerJSONSerialization {
     }
 
     // MARK: - Private Helpers
-
-    private static func isValidJSONObject(_ obj: Any, allowNonFiniteNumbers: Bool) -> Bool {
-        guard obj is NSArray || obj is NSDictionary else {
-            return false
-        }
-        return isValidJSONObjectRecursive(obj, allowNonFiniteNumbers: allowNonFiniteNumbers)
-    }
 
     private static func isValidJSONObjectRecursive(
         _ obj: Any,
@@ -327,80 +320,217 @@ public enum ReerJSONSerialization {
         return try value.data(options: writeOptions)
     }
 
+    private static let invalidObjectError = JSONError.invalidData("Invalid JSON object")
+
+    /// Converts and validates a Foundation object graph in a single pass.
+    ///
+    /// Any value that `isValidJSONObject` would reject throws `invalidObjectError`.
     private static func foundationObjectToYYJSON(
         _ obj: Any,
         doc: UnsafeMutablePointer<yyjson_mut_doc>,
         options: WritingOptions
     ) throws -> UnsafeMutablePointer<yyjson_mut_val> {
-        switch obj {
-        case let str as NSString:
-            return try yyFromString(str as String, in: doc)
+        #if canImport(Darwin)
+            // Class checks on AnyObject are plain `isKindOfClass` calls, whereas
+            // casting `Any` goes through the much slower generic dynamic cast.
+            return try foundationObjectToYYJSON(object: obj as AnyObject, doc: doc, options: options)
+        #else
+            switch obj {
+            case let str as NSString:
+                return try yyFromString(str as String, in: doc)
+            case let num as NSNumber:
+                return try numberToYYJSON(num, doc: doc, options: options)
+            case is NSNull:
+                return yyjson_mut_null(doc)
+            case let arr as NSArray:
+                let jsonArr = try makeArray(doc)
+                for element in arr {
+                    _ = yyjson_mut_arr_append(jsonArr, try foundationObjectToYYJSON(element, doc: doc, options: options))
+                }
+                return jsonArr
+            case let dict as NSDictionary:
+                let jsonObj = try makeObject(doc)
+                if options.contains(.sortedKeys) {
+                    for (key, value) in try sortedEntries(of: dict) {
+                        try addEntry(key: key, value: value, to: jsonObj, doc: doc, options: options)
+                    }
+                } else {
+                    for (key, value) in dict {
+                        guard let keyString = key as? String else { throw invalidObjectError }
+                        try addEntry(key: keyString, value: value, to: jsonObj, doc: doc, options: options)
+                    }
+                }
+                return jsonObj
+            default:
+                throw invalidObjectError
+            }
+        #endif
+    }
 
-        case let num as NSNumber:
+    #if canImport(Darwin)
+        private static func foundationObjectToYYJSON(
+            object: AnyObject,
+            doc: UnsafeMutablePointer<yyjson_mut_doc>,
+            options: WritingOptions
+        ) throws -> UnsafeMutablePointer<yyjson_mut_val> {
+            if let str = object as? NSString {
+                return try stringToYYJSON(str, doc: doc)
+            }
+            if let num = object as? NSNumber {
+                return try numberToYYJSON(num, doc: doc, options: options)
+            }
+            if let dict = object as? NSDictionary {
+                let jsonObj = try makeObject(doc)
+                let count = CFDictionaryGetCount(dict)
+                try withUnsafeTemporaryAllocation(of: UnsafeRawPointer?.self, capacity: max(count * 2, 1)) { buffer in
+                    let keys = buffer.baseAddress!, values = keys + count
+                    CFDictionaryGetKeysAndValues(dict, keys, values)
+                    if options.contains(.sortedKeys) {
+                        var entries: [(key: String, nsKey: NSString, value: AnyObject)] = []
+                        entries.reserveCapacity(count)
+                        for i in 0..<count {
+                            let key = Unmanaged<AnyObject>.fromOpaque(keys[i]!).takeUnretainedValue()
+                            guard let keyString = key as? NSString else { throw invalidObjectError }
+                            let value = Unmanaged<AnyObject>.fromOpaque(values[i]!).takeUnretainedValue()
+                            entries.append((keyString as String, keyString, value))
+                        }
+                        entries.sort { $0.key < $1.key }
+                        for entry in entries {
+                            let keyVal = try stringToYYJSON(entry.nsKey, doc: doc)
+                            let valueVal = try foundationObjectToYYJSON(object: entry.value, doc: doc, options: options)
+                            _ = yyjson_mut_obj_add(jsonObj, keyVal, valueVal)
+                        }
+                    } else {
+                        for i in 0..<count {
+                            let key = Unmanaged<AnyObject>.fromOpaque(keys[i]!).takeUnretainedValue()
+                            guard let keyString = key as? NSString else { throw invalidObjectError }
+                            let value = Unmanaged<AnyObject>.fromOpaque(values[i]!).takeUnretainedValue()
+                            let keyVal = try stringToYYJSON(keyString, doc: doc)
+                            let valueVal = try foundationObjectToYYJSON(object: value, doc: doc, options: options)
+                            _ = yyjson_mut_obj_add(jsonObj, keyVal, valueVal)
+                        }
+                    }
+                }
+                return jsonObj
+            }
+            if let arr = object as? NSArray {
+                let jsonArr = try makeArray(doc)
+                let count = CFArrayGetCount(arr)
+                try withUnsafeTemporaryAllocation(of: UnsafeRawPointer?.self, capacity: max(count, 1)) { buffer in
+                    CFArrayGetValues(arr, CFRange(location: 0, length: count), buffer.baseAddress!)
+                    for element in buffer.prefix(count) {
+                        let object = Unmanaged<AnyObject>.fromOpaque(element!).takeUnretainedValue()
+                        let elementVal = try foundationObjectToYYJSON(object: object, doc: doc, options: options)
+                        _ = yyjson_mut_arr_append(jsonArr, elementVal)
+                    }
+                }
+                return jsonArr
+            }
+            if object is NSNull {
+                return yyjson_mut_null(doc)
+            }
+            throw invalidObjectError
+        }
+
+        @inline(__always)
+        private static func stringToYYJSON(
+            _ string: NSString,
+            doc: UnsafeMutablePointer<yyjson_mut_doc>
+        ) throws -> UnsafeMutablePointer<yyjson_mut_val> {
+            let cfString = string as CFString
+            // CFStringGetCStringPtr only succeeds for ASCII storage, where the
+            // UTF-16 length equals the UTF-8 byte count.
+            let length = CFStringGetLength(cfString)
+            let utf8 = CFStringBuiltInEncodings.UTF8.rawValue
+            if let ptr = CFStringGetCStringPtr(cfString, utf8),
+               let val = yyjson_mut_strncpy(doc, ptr, length) {
+                return val
+            }
+            let capacity = CFStringGetMaximumSizeForEncoding(length, utf8)
+            let val = withUnsafeTemporaryAllocation(of: CChar.self, capacity: max(capacity, 1)) { buffer -> UnsafeMutablePointer<yyjson_mut_val>? in
+                let base = buffer.baseAddress!
+                var used: CFIndex = 0
+                let converted = base.withMemoryRebound(to: UInt8.self, capacity: buffer.count) {
+                    CFStringGetBytes(cfString, CFRange(location: 0, length: length), utf8, 0, false, $0, capacity, &used)
+                }
+                // A short conversion means unpaired surrogates; leave those to String bridging.
+                guard converted == length else { return nil }
+                return yyjson_mut_strncpy(doc, base, used)
+            }
+            if let val {
+                return val
+            }
+            return try yyFromString(string as String, in: doc)
+        }
+    #else
+        private static func addEntry(
+            key: String,
+            value: Any,
+            to jsonObj: UnsafeMutablePointer<yyjson_mut_val>,
+            doc: UnsafeMutablePointer<yyjson_mut_doc>,
+            options: WritingOptions
+        ) throws {
+            let keyVal = try yyFromString(key, in: doc)
+            let valueVal = try foundationObjectToYYJSON(value, doc: doc, options: options)
+            _ = yyjson_mut_obj_add(jsonObj, keyVal, valueVal)
+        }
+
+        /// Returns the entries sorted by key; throws if any key is not a string.
+        private static func sortedEntries(of dict: NSDictionary) throws -> [(key: String, value: Any)] {
+            var entries: [(key: String, value: Any)] = []
+            entries.reserveCapacity(dict.count)
+            for (key, value) in dict {
+                guard let keyString = key as? String else { throw invalidObjectError }
+                entries.append((keyString, value))
+            }
+            entries.sort { $0.key < $1.key }
+            return entries
+        }
+    #endif
+
+    @inline(__always)
+    private static func numberToYYJSON(
+        _ num: NSNumber,
+        doc: UnsafeMutablePointer<yyjson_mut_doc>,
+        options: WritingOptions
+    ) throws -> UnsafeMutablePointer<yyjson_mut_val> {
+        if isBoolNumber(num) {
+            return yyjson_mut_bool(doc, num.boolValue)
+        }
+        switch num.objCType.pointee {
+        case 0x63, 0x73, 0x69, 0x6C, 0x71:  // 'c', 's', 'i', 'l', 'q' (signed integers)
+            return yyjson_mut_sint(doc, num.int64Value)
+        case 0x43, 0x53, 0x49, 0x4C, 0x51:  // 'C', 'S', 'I', 'L', 'Q' (unsigned integers)
+            return yyjson_mut_uint(doc, num.uint64Value)
+        default:
             let doubleValue = num.doubleValue
-            if doubleValue.isNaN || doubleValue.isInfinite {
+            if !doubleValue.isFinite {
                 if options.contains(.infAndNaNAsNull) {
                     return yyjson_mut_null(doc)
                 }
                 if options.contains(.allowInfAndNaN) {
                     return yyjson_mut_real(doc, doubleValue)
                 }
-                throw JSONError.invalidData("NaN or Infinity not allowed in JSON")
+                throw invalidObjectError
             }
-
-            if isBoolNumber(num) {
-                return yyjson_mut_bool(doc, num.boolValue)
-            }
-
-            let objCType = num.objCType.pointee
-            switch objCType {
-            case 0x63, 0x73, 0x69, 0x6C, 0x71:  // 'c', 's', 'i', 'l', 'q' (signed integers)
-                return yyjson_mut_sint(doc, num.int64Value)
-            case 0x43, 0x53, 0x49, 0x4C, 0x51:  // 'C', 'S', 'I', 'L', 'Q' (unsigned integers)
-                return yyjson_mut_uint(doc, num.uint64Value)
-            default:
-                return yyjson_mut_real(doc, doubleValue)
-            }
-
-        case is NSNull:
-            return yyjson_mut_null(doc)
-
-        case let arr as NSArray:
-            guard let jsonArr = yyjson_mut_arr(doc) else {
-                throw JSONError.invalidData("Failed to create array")
-            }
-            for element in arr {
-                let elementVal = try foundationObjectToYYJSON(element, doc: doc, options: options)
-                _ = yyjson_mut_arr_append(jsonArr, elementVal)
-            }
-            return jsonArr
-
-        case let dict as NSDictionary:
-            guard let jsonObj = yyjson_mut_obj(doc) else {
-                throw JSONError.invalidData("Failed to create object")
-            }
-
-            let keys: [Any]
-            if options.contains(.sortedKeys) {
-                keys = (dict.allKeys as? [String])?.sorted() ?? dict.allKeys
-            } else {
-                keys = dict.allKeys
-            }
-
-            for key in keys {
-                guard let keyString = key as? String else {
-                    throw JSONError.invalidData("Dictionary keys must be strings")
-                }
-                guard let value = dict[key] else { continue }
-                let keyVal = try yyFromString(keyString, in: doc)
-                let valueVal = try foundationObjectToYYJSON(value, doc: doc, options: options)
-                _ = yyjson_mut_obj_put(jsonObj, keyVal, valueVal)
-            }
-            return jsonObj
-
-        default:
-            throw JSONError.invalidData("Unsupported Foundation type: \(type(of: obj))")
+            return yyjson_mut_real(doc, doubleValue)
         }
+    }
+
+    @inline(__always)
+    private static func makeArray(_ doc: UnsafeMutablePointer<yyjson_mut_doc>) throws -> UnsafeMutablePointer<yyjson_mut_val> {
+        guard let arr = yyjson_mut_arr(doc) else {
+            throw JSONError.invalidData("Failed to create array")
+        }
+        return arr
+    }
+
+    @inline(__always)
+    private static func makeObject(_ doc: UnsafeMutablePointer<yyjson_mut_doc>) throws -> UnsafeMutablePointer<yyjson_mut_val> {
+        guard let obj = yyjson_mut_obj(doc) else {
+            throw JSONError.invalidData("Failed to create object")
+        }
+        return obj
     }
 }
 

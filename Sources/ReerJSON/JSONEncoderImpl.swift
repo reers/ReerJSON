@@ -36,7 +36,16 @@ import JJLISO8601DateFormatter
 /// insertion O(1) instead of scanning the whole object like
 /// `yyjson_mut_obj_put` does. See `JSONEncoderImpl.putKey`.
 final class ObjectKeyIndex {
-    static let threshold = 32
+    /// Objects at least this wide switch from `yyjson_mut_obj_put`'s linear
+    /// duplicate scan to the `ObjectKeyIndex` key set. Enabling it too early is
+    /// a net loss: building a `Set<String>` for an object of a few dozen keys
+    /// costs more than the scan it saves. That showed up as a ~20% encoder
+    /// slowdown on Twitter, whose `user` objects carry 40 keys each. The win
+    /// only materialises for genuinely wide objects (hundreds of keys and up),
+    /// so the threshold sits well above the widths found in typical payloads
+    /// while still leaving `encoderKeyedContainerScalesLinearlyWithWidth`
+    /// comfortably linear.
+    static let threshold = 256
     private var keySets: [UnsafeMutablePointer<yyjson_mut_val>: Set<String>] = [:]
 
     func contains(_ key: String, in object: UnsafeMutablePointer<yyjson_mut_val>) -> Bool {
@@ -106,6 +115,12 @@ class JSONEncoderImpl: Encoder {
     /// Inserts `key` into a keyed-container object, replacing the value of an
     /// existing equal key in place. Every insertion into such an object must
     /// go through here so that `ObjectKeyIndex` stays in sync.
+    ///
+    /// This is the *wide-object* path: it reads the object's width on every
+    /// call and may build a key set. Keyed containers stay off it entirely
+    /// until they have written `ObjectKeyIndex.threshold` keys, so narrow
+    /// objects (the common case) never pay for the width check. See
+    /// `YYJSONKeyedEncodingContainer.addToObject`.
     @inline(__always)
     func putKey(_ key: String, _ value: UnsafeMutablePointer<yyjson_mut_val>, into object: UnsafeMutablePointer<yyjson_mut_val>) {
         if yyjson_mut_obj_size(object) < ObjectKeyIndex.threshold {
@@ -530,9 +545,22 @@ private struct YYJSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContaine
         impl.wrapString(s)
     }
 
-    @inline(__always)
-    private func addToObject(key: String, value: UnsafeMutablePointer<yyjson_mut_val>) {
-        impl.putKey(key, value, into: object)
+    /// Number of keys this container has already inserted into `object`.
+    ///
+    /// Narrow objects (the common case) stay on the plain `yyjson_mut_obj_put`
+    /// fast path and never call into `impl.putKey`, so they never pay for the
+    /// per-insert width check that path performs. Only once the container has
+    /// written `ObjectKeyIndex.threshold` keys does it hand over to the shared
+    /// index, which discovers the earlier keys lazily and stays in sync.
+    private var insertedKeyCount = 0
+
+    private mutating func addToObject(key: String, value: UnsafeMutablePointer<yyjson_mut_val>) {
+        if insertedKeyCount < ObjectKeyIndex.threshold {
+            insertedKeyCount += 1
+            yyjson_mut_obj_put(object, _strVal(key), value)
+        } else {
+            impl.putKey(key, value, into: object)
+        }
     }
 
     mutating func encodeNil(forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_null(doc)) }

@@ -159,6 +159,9 @@ extension JSON {
     @inline(__always)
     func integer<T: FixedWidthInteger>() -> T? {
         guard let cString = yyjson_get_raw(pointer) else { return nil }
+        if let value = Self.parsePlainInteger(cString, count: yyjson_get_len(pointer)) {
+            return T(exactly: value)
+        }
         var convertedVal = yyjson_val()
         var error = yyjson_read_err()
         guard let _ = yyjson_read_number(cString, &convertedVal, YYJSON_READ_ALLOW_EXT_NUMBER, nil, &error) else {
@@ -180,6 +183,25 @@ extension JSON {
         return nil
     }
     
+    /// Parses `-?[0-9]{1,18}` without going through `yyjson_read_number`.
+    /// Anything else (fractions, exponents, JSON5 forms, 19+ digits) returns
+    /// nil; 18 decimal digits cannot overflow `Int64`.
+    @inline(__always)
+    private static func parsePlainInteger(_ chars: UnsafePointer<CChar>, count: Int) -> Int64? {
+        guard count > 0, count <= 18 else { return nil }
+        let negative = chars[0] == 0x2D
+        var index = negative ? 1 : 0
+        guard index < count else { return nil }
+        var value: Int64 = 0
+        while index < count {
+            let digit = UInt8(bitPattern: chars[index]) &- 0x30
+            guard digit < 10 else { return nil }
+            value = value &* 10 &+ Int64(digit)
+            index &+= 1
+        }
+        return negative ? -value : value
+    }
+
     var rawString: String? {
         guard let cString = yyjson_get_raw(pointer) else { return nil }
         return String(cString: cString)

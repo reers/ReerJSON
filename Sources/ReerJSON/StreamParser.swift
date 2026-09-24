@@ -94,6 +94,7 @@ public struct JSONStreamParser: Sendable {
     private var buffer: Data
     private var readOffset: Int
     private var arrayState: ArrayParseState
+    private var lastItemSize: Int = 0
 
     /// The number of bytes buffered but not yet consumed.
     public var pendingByteCount: Int {
@@ -157,6 +158,7 @@ public struct JSONStreamParser: Sendable {
         buffer.removeAll(keepingCapacity: true)
         readOffset = 0
         arrayState = .expectOpenBracket
+        lastItemSize = 0
     }
 
     // MARK: - Private Types
@@ -303,32 +305,63 @@ public struct JSONStreamParser: Sendable {
         let available = buffer.count - readOffset
         guard available > 0 else { return nil }
 
-        // yyjson_read_opts() in non-INSITU mode allocates its own padded buffer
-        // and copies the input — so we do not need to add YYJSON_PADDING_SIZE
-        // bytes ourselves here.
+        // yyjson_read_opts() in non-INSITU mode copies the whole input it is
+        // given, so handing it everything up to the buffer end would cost
+        // O(remaining bytes) per item and O(K²) for K buffered items. Parse a
+        // window sized from the previous item instead, and only widen it when
+        // the window cannot decide the value on its own. Once the window
+        // covers all available bytes the behavior is exactly that of a
+        // whole-buffer parse.
         let startOffset = readOffset
-        let result: DocumentRef.StreamParseResult = try buffer.withUnsafeBytes { rawBuffer in
-            guard let base = rawBuffer.baseAddress else { return .needMoreData }
-            let bytes = base.advanced(by: startOffset).assumingMemoryBound(to: UInt8.self)
-            return try DocumentRef.streamParse(bytes: bytes, count: available, options: options)
-        }
-
-        switch result {
-        case .needMoreData:
-            return nil
-        case .success(let doc, let consumed):
-            let endOffset = startOffset + consumed
-
-            // Boundary safety:
-            // A successful parse that ends exactly at the buffer end may be a
-            // truncated numeric token (e.g. we have "12" so far but the source
-            // is actually "123"). yyjson cannot tell the difference. Defer the
-            // value until either more data arrives or the caller finalizes.
-            if !finalizing && endOffset >= buffer.count {
-                return nil
+        var window = min(available, max(Self.minimumParseWindow, lastItemSize &* 2))
+        while true {
+            let isWholeBuffer = window == available
+            let result: DocumentRef.StreamParseResult
+            do {
+                result = try parseWindow(at: startOffset, count: window)
+            } catch where !isWholeBuffer {
+                window = min(available, window &* 2)
+                continue
             }
-            readOffset = endOffset
-            return ParsedItem(document: doc)
+
+            switch result {
+            case .needMoreData:
+                guard isWholeBuffer else {
+                    window = min(available, window &* 2)
+                    continue
+                }
+                return nil
+            case .success(let doc, let consumed):
+                // A value ending exactly at the window end may continue past it
+                // (e.g. "12" of "123"); only a whole-buffer parse can decide.
+                if consumed >= window && !isWholeBuffer {
+                    window = min(available, window &* 2)
+                    continue
+                }
+                let endOffset = startOffset + consumed
+
+                // Boundary safety:
+                // A successful parse that ends exactly at the buffer end may be a
+                // truncated numeric token (e.g. we have "12" so far but the source
+                // is actually "123"). yyjson cannot tell the difference. Defer the
+                // value until either more data arrives or the caller finalizes.
+                if !finalizing && endOffset >= buffer.count {
+                    return nil
+                }
+                readOffset = endOffset
+                lastItemSize = consumed
+                return ParsedItem(document: doc)
+            }
+        }
+    }
+
+    private static let minimumParseWindow = 256
+
+    private func parseWindow(at offset: Int, count: Int) throws -> DocumentRef.StreamParseResult {
+        try buffer.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress else { return .needMoreData }
+            let bytes = base.advanced(by: offset).assumingMemoryBound(to: UInt8.self)
+            return try DocumentRef.streamParse(bytes: bytes, count: count, options: options)
         }
     }
 

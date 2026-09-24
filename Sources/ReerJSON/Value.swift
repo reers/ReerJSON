@@ -24,6 +24,66 @@
 import yyjson
 import Foundation
 
+// MARK: - Document Parsing (Internal)
+
+/// Parses JSON from `data` without modifying it.
+///
+/// `YYJSON_READ_INSITU` is masked out: in-place parsing would leave the
+/// document pointing into a buffer the caller still owns.
+private func parseDocument(copying data: Data, options: JSONReadOptions) throws -> UnsafeMutablePointer<yyjson_doc> {
+    var error = yyjson_read_err()
+    var flags = options.yyjsonFlags
+    flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
+
+    if data.isEmpty {
+        throw JSONError.invalidJSON("Empty content")
+    }
+
+    guard let doc = yyReadDocument(from: data, flags: flags, error: &error) else {
+        throw JSONError(parsing: error)
+    }
+    return doc
+}
+
+/// Parses JSON in place inside `data` and takes ownership of it.
+///
+/// Returns the document together with the buffer it points into, which must
+/// be kept alive for as long as the document. `data` is left empty.
+private func parseDocument(
+    consuming data: inout Data,
+    options: JSONReadOptions
+) throws -> (UnsafeMutablePointer<yyjson_doc>, Data) {
+    var error = yyjson_read_err()
+    var flags = options.yyjsonFlags
+    flags |= YYJSON_READ_INSITU
+
+    if data.isEmpty {
+        throw JSONError.invalidJSON("Empty content")
+    }
+
+    let paddingSize = Int(YYJSON_PADDING_SIZE)
+    let originalCount = data.count
+
+    data.reserveCapacity(originalCount + paddingSize)
+    data.append(contentsOf: repeatElement(0 as UInt8, count: paddingSize))
+
+    let result = data.withUnsafeMutableBytes { bytes in
+        yyReadDocument(
+            mutating: bytes,
+            validByteCount: originalCount,
+            flags: flags,
+            error: &error
+        )
+    }
+
+    guard let doc = result else {
+        throw JSONError(parsing: error)
+    }
+    let retainedData = data
+    data.removeAll(keepingCapacity: false)
+    return (doc, retainedData)
+}
+
 // MARK: - Document Storage (Internal)
 
 /// Move-only owner for a yyjson document.
@@ -46,22 +106,7 @@ internal struct DocumentStorage: ~Copyable, @unchecked Sendable {
     ///   - options: Options for reading the JSON.
     /// - Throws: `JSONError` if parsing fails.
     init(data: Data, options: JSONReadOptions = .default) throws {
-        var error = yyjson_read_err()
-        var flags = options.yyjsonFlags
-        // Mask out YYJSON_READ_INSITU to prevent use-after-free issues.
-        // In-place parsing must use the dedicated consuming initializer.
-        flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
-
-        if data.isEmpty {
-            throw JSONError.invalidJSON("Empty content")
-        }
-
-        let result = yyReadDocument(from: data, flags: flags, error: &error)
-
-        guard let doc = result else {
-            throw JSONError(parsing: error)
-        }
-        self.doc = doc
+        self.doc = try parseDocument(copying: data, options: options)
         self.retainedData = nil
     }
 
@@ -77,35 +122,9 @@ internal struct DocumentStorage: ~Copyable, @unchecked Sendable {
     ///   - options: Options for reading the JSON.
     /// - Throws: `JSONError` if parsing fails.
     init(consuming data: inout Data, options: JSONReadOptions = .default) throws {
-        var error = yyjson_read_err()
-        var flags = options.yyjsonFlags
-        flags |= YYJSON_READ_INSITU
-
-        if data.isEmpty {
-            throw JSONError.invalidJSON("Empty content")
-        }
-
-        let paddingSize = Int(YYJSON_PADDING_SIZE)
-        let originalCount = data.count
-
-        data.reserveCapacity(originalCount + paddingSize)
-        data.append(contentsOf: repeatElement(0 as UInt8, count: paddingSize))
-
-        let result = data.withUnsafeMutableBytes { bytes in
-            yyReadDocument(
-                mutating: bytes,
-                validByteCount: originalCount,
-                flags: flags,
-                error: &error
-            )
-        }
-
-        guard let doc = result else {
-            throw JSONError(parsing: error)
-        }
+        let (doc, retainedData) = try parseDocument(consuming: &data, options: options)
         self.doc = doc
-        self.retainedData = data
-        data.removeAll(keepingCapacity: false)
+        self.retainedData = retainedData
     }
 
     deinit {
@@ -132,84 +151,19 @@ internal final class DocumentRef: @unchecked Sendable {
     private let retainedData: Data?
 
     init(data: Data, options: JSONReadOptions = .default) throws {
-        var error = yyjson_read_err()
-        var flags = options.yyjsonFlags
-        flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
-
-        if data.isEmpty {
-            throw JSONError.invalidJSON("Empty content")
-        }
-
-        let result = yyReadDocument(from: data, flags: flags, error: &error)
-
-        guard let doc = result else {
-            throw JSONError(parsing: error)
-        }
-        self.doc = doc
+        self.doc = try parseDocument(copying: data, options: options)
         self.retainedData = nil
     }
 
     init(consuming data: inout Data, options: JSONReadOptions = .default) throws {
-        var error = yyjson_read_err()
-        var flags = options.yyjsonFlags
-        flags |= YYJSON_READ_INSITU
-
-        if data.isEmpty {
-            throw JSONError.invalidJSON("Empty content")
-        }
-
-        let paddingSize = Int(YYJSON_PADDING_SIZE)
-        let originalCount = data.count
-
-        data.reserveCapacity(originalCount + paddingSize)
-        data.append(contentsOf: repeatElement(0 as UInt8, count: paddingSize))
-
-        let result = data.withUnsafeMutableBytes { bytes in
-            yyReadDocument(
-                mutating: bytes,
-                validByteCount: originalCount,
-                flags: flags,
-                error: &error
-            )
-        }
-
-        guard let doc = result else {
-            throw JSONError(parsing: error)
-        }
+        let (doc, retainedData) = try parseDocument(consuming: &data, options: options)
         self.doc = doc
-        self.retainedData = data
-        data.removeAll(keepingCapacity: false)
+        self.retainedData = retainedData
     }
 
     enum StreamParseResult {
         case success(DocumentRef, consumedBytes: Int)
         case needMoreData
-    }
-
-    static func streamParse(
-        bytes: Span<UInt8>,
-        options: JSONReadOptions
-    ) throws -> StreamParseResult {
-        guard !bytes.isEmpty else { return .needMoreData }
-
-        var error = yyjson_read_err()
-        var flags = options.yyjsonFlags
-        flags |= YYJSON_READ_STOP_WHEN_DONE
-        flags &= ~yyjson_read_flag(YYJSON_READ_INSITU)
-
-        let result = yyReadDocument(from: bytes.bytes, flags: flags, error: &error)
-
-        if let doc = result {
-            let consumed = yyjson_doc_get_read_size(doc)
-            return .success(DocumentRef(alreadyParsed: doc), consumedBytes: consumed)
-        }
-
-        if error.code == YYJSON_READ_ERROR_UNEXPECTED_END
-            || error.code == YYJSON_READ_ERROR_EMPTY_CONTENT {
-            return .needMoreData
-        }
-
-        throw JSONError(parsing: error)
     }
 
     static func streamParse(

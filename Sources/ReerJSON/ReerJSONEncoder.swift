@@ -177,11 +177,18 @@ open class ReerJSONEncoder {
 
     public init() {}
 
+    func optionsSnapshot() -> Options {
+        optionsLock.lock()
+        defer { optionsLock.unlock() }
+        return options
+    }
+
     open func encode<T: Encodable>(_ value: T) throws -> Data {
         let doc = yyjson_mut_doc_new(nil)!
         defer { yyjson_mut_doc_free(doc) }
         
-        let encoder = JSONEncoderImpl(doc: doc, codingPath: [], options: options)
+        let encoder = JSONEncoderImpl(doc: doc, codingPath: [], options: optionsSnapshot())
+        let outputFormatting = encoder.options.outputFormatting
         
         if let date = value as? Date {
             encoder.singleValue = try encoder.wrapDateValue(date, for: nil)
@@ -242,7 +249,8 @@ open class ReerJSONEncoder {
         let doc = yyjson_mut_doc_new(nil)!
         defer { yyjson_mut_doc_free(doc) }
         
-        let encoder = JSONEncoderImpl(doc: doc, codingPath: [], options: options)
+        let encoder = JSONEncoderImpl(doc: doc, codingPath: [], options: optionsSnapshot())
+        let outputFormatting = encoder.options.outputFormatting
         try value.encode(to: encoder, configuration: configuration)
         
         guard let root = encoder.takeValue() else {

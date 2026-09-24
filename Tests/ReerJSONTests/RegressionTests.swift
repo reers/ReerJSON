@@ -186,6 +186,83 @@ struct RegressionTests {
         #expect(String(decoding: data, as: UTF8.self) == "[\"a\u{FFFD}b\"]")
     }
 
+    // MARK: - Encoder keyed containers
+
+    private struct DynamicKey: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(_ string: String) { stringValue = string }
+        init(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    private struct WideObject: Encodable {
+        let count: Int
+        var overrides: [(key: Int, value: Int)] = []
+        var superKeys: [Int] = []
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: DynamicKey.self)
+            for i in 0..<count { try container.encode(i, forKey: DynamicKey("key_\(i)")) }
+            for (key, value) in overrides { try container.encode(value, forKey: DynamicKey("key_\(key)")) }
+            for key in superKeys {
+                var single = container.superEncoder(forKey: DynamicKey("key_\(key)")).singleValueContainer()
+                try single.encode("super_\(key)")
+            }
+        }
+    }
+
+    @Test func encoderKeyedContainerScalesLinearlyWithWidth() throws {
+        let encoder = ReerJSONEncoder()
+        let small = WideObject(count: 1_000), large = WideObject(count: 8_000)
+        let smallTime = try Self.bestTime { _ = try encoder.encode(small) }
+        let largeTime = try Self.bestTime { _ = try encoder.encode(large) }
+        // 8x the keys: linear ≈ 8x, quadratic ≈ 64x.
+        #expect(largeTime / smallTime < 24, "ratio \(largeTime / smallTime)")
+    }
+
+    @Test(arguments: [5, 31, 32, 33, 200])
+    func encoderWideObjectKeepsLastValueForDuplicateKeys(count: Int) throws {
+        var object = WideObject(count: count)
+        object.overrides = [(0, -1), (count - 1, -2), (count / 2, -3), (count - 1, -4)]
+        object.superKeys = [1, count - 2]
+        let data = try ReerJSONEncoder().encode(object)
+        let text = String(decoding: data, as: UTF8.self)
+        let value = try JSONValue(data: data)
+        let keys = try #require(value.object).map(\.key)
+        #expect(keys == (0..<count).map { "key_\($0)" })
+        #expect(value["key_0"]?.int64 == -1)
+        #expect(value["key_\(count / 2)"]?.int64 == (count / 2 == count - 1 ? -4 : -3))
+        #expect(value["key_\(count - 1)"]?.int64 == -4)
+        #expect(value["key_1"]?.string == "super_1")
+        #expect(value["key_\(count - 2)"]?.string == "super_\(count - 2)")
+        let foundation = try JSONSerialization.jsonObject(with: JSONEncoder().encode(object)) as! [String: Any]
+        let reer = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(NSDictionary(dictionary: foundation) == NSDictionary(dictionary: reer), "\(text)")
+    }
+
+    private struct DictionaryThenKeyed: Encodable {
+        let count: Int
+        func encode(to encoder: Encoder) throws {
+            var single = encoder.singleValueContainer()
+            try single.encode(Dictionary(uniqueKeysWithValues: (0..<count).map { ("key_\($0)", $0) }))
+            var keyed = encoder.container(keyedBy: DynamicKey.self)
+            try keyed.encode(-1, forKey: DynamicKey("key_0"))
+            try keyed.encode(-2, forKey: DynamicKey("extra"))
+            try keyed.encode(-3, forKey: DynamicKey("key_\(count - 1)"))
+        }
+    }
+
+    @Test(arguments: [3, 40, 100])
+    func encoderKeyedContainerAmendsExistingDictionary(count: Int) throws {
+        let data = try ReerJSONEncoder().encode(DictionaryThenKeyed(count: count))
+        let value = try #require(try JSONValue(data: data).object)
+        #expect(value.count == count + 1)
+        #expect(value["key_0"]?.int64 == -1)
+        #expect(value["extra"]?.int64 == -2)
+        #expect(value["key_\(count - 1)"]?.int64 == -3)
+        #expect(value["key_1"]?.int64 == 1)
+    }
+
     @Test func serializationWriteRejectsInvalidObjects() throws {
         let invalid = JSONError.invalidData("Invalid JSON object")
         let cases: [Any] = [

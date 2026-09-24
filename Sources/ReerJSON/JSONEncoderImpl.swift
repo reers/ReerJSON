@@ -32,10 +32,46 @@ import yyjson
 import JJLISO8601DateFormatter
 #endif
 
+/// Key sets for wide encoder objects, used to keep "last value wins"
+/// insertion O(1) instead of scanning the whole object like
+/// `yyjson_mut_obj_put` does. See `JSONEncoderImpl.putKey`.
+final class ObjectKeyIndex {
+    static let threshold = 32
+    private var keySets: [UnsafeMutablePointer<yyjson_mut_val>: Set<String>] = [:]
+
+    func put(
+        _ key: String,
+        _ value: UnsafeMutablePointer<yyjson_mut_val>,
+        into object: UnsafeMutablePointer<yyjson_mut_val>,
+        impl: JSONEncoderImpl
+    ) {
+        let inserted = keySets[object, default: Self.existingKeys(of: object)].insert(key).inserted
+        if inserted {
+            yyjson_mut_obj_add(object, impl.wrapString(key), value)
+        } else {
+            yyjson_mut_obj_put(object, impl.wrapString(key), value)
+        }
+    }
+
+    private static func existingKeys(of object: UnsafeMutablePointer<yyjson_mut_val>) -> Set<String> {
+        var keys = Set<String>(minimumCapacity: Int(yyjson_mut_obj_size(object)) * 2)
+        var iter = yyjson_mut_obj_iter()
+        guard yyjson_mut_obj_iter_init(object, &iter) else { return keys }
+        while let keyVal = yyjson_mut_obj_iter_next(&iter) {
+            if let str = yyjson_mut_get_str(keyVal) {
+                let buffer = UnsafeRawBufferPointer(start: str, count: yyjson_mut_get_len(keyVal))
+                keys.insert(String(decoding: buffer, as: UTF8.self))
+            }
+        }
+        return keys
+    }
+}
+
 class JSONEncoderImpl: Encoder {
     let doc: UnsafeMutablePointer<yyjson_mut_doc>
     let options: ReerJSONEncoder.Options
     var codingPath: [CodingKey]
+    private var _objectKeyIndex: ObjectKeyIndex?
 
     var userInfo: [CodingUserInfoKey: Any] { options.userInfo }
 
@@ -43,10 +79,36 @@ class JSONEncoderImpl: Encoder {
     var array: UnsafeMutablePointer<yyjson_mut_val>?
     var object: UnsafeMutablePointer<yyjson_mut_val>?
 
-    init(doc: UnsafeMutablePointer<yyjson_mut_doc>, codingPath: [CodingKey], options: ReerJSONEncoder.Options) {
+    init(
+        doc: UnsafeMutablePointer<yyjson_mut_doc>,
+        codingPath: [CodingKey],
+        options: ReerJSONEncoder.Options,
+        objectKeyIndex: ObjectKeyIndex? = nil
+    ) {
         self.doc = doc
         self.codingPath = codingPath
         self.options = options
+        self._objectKeyIndex = objectKeyIndex
+    }
+
+    /// Shared by every encoder writing into this document's objects.
+    var objectKeyIndex: ObjectKeyIndex {
+        if let index = _objectKeyIndex { return index }
+        let index = ObjectKeyIndex()
+        _objectKeyIndex = index
+        return index
+    }
+
+    /// Inserts `key` into a keyed-container object, replacing the value of an
+    /// existing equal key in place. Every insertion into such an object must
+    /// go through here so that `ObjectKeyIndex` stays in sync.
+    @inline(__always)
+    func putKey(_ key: String, _ value: UnsafeMutablePointer<yyjson_mut_val>, into object: UnsafeMutablePointer<yyjson_mut_val>) {
+        if yyjson_mut_obj_size(object) < ObjectKeyIndex.threshold {
+            yyjson_mut_obj_put(object, wrapString(key), value)
+        } else {
+            objectKeyIndex.put(key, value, into: object, impl: self)
+        }
     }
 
     @inline(__always)
@@ -459,7 +521,7 @@ private struct YYJSONKeyedEncodingContainer<K: CodingKey>: KeyedEncodingContaine
 
     @inline(__always)
     private func addToObject(key: String, value: UnsafeMutablePointer<yyjson_mut_val>) {
-        yyjson_mut_obj_put(object, _strVal(key), value)
+        impl.putKey(key, value, into: object)
     }
 
     mutating func encodeNil(forKey key: Key) throws { addToObject(key: _key(key), value: yyjson_mut_null(doc)) }
@@ -567,10 +629,10 @@ private class YYJSONReferencingEncoder: JSONEncoderImpl {
     let referencedObject: UnsafeMutablePointer<yyjson_mut_val>
     init(impl: JSONEncoderImpl, key: String, codingPath: [CodingKey], object: UnsafeMutablePointer<yyjson_mut_val>) {
         self.key = key; self.referencedObject = object
-        super.init(doc: impl.doc, codingPath: codingPath, options: impl.options)
+        super.init(doc: impl.doc, codingPath: codingPath, options: impl.options, objectKeyIndex: impl.objectKeyIndex)
     }
     deinit {
-        yyjson_mut_obj_put(referencedObject, wrapString(key), takeValue() ?? yyjson_mut_obj(doc)!)
+        putKey(key, takeValue() ?? yyjson_mut_obj(doc)!, into: referencedObject)
     }
 }
 
@@ -579,7 +641,7 @@ private class YYJSONReferencingArrayEncoder: JSONEncoderImpl {
     let insertIndex: Int
     init(impl: JSONEncoderImpl, codingPath: [CodingKey], array: UnsafeMutablePointer<yyjson_mut_val>, index: Int) {
         self.referencedArray = array; self.insertIndex = index
-        super.init(doc: impl.doc, codingPath: codingPath, options: impl.options)
+        super.init(doc: impl.doc, codingPath: codingPath, options: impl.options, objectKeyIndex: impl.objectKeyIndex)
     }
     deinit {
         yyjson_mut_arr_insert(referencedArray, takeValue() ?? yyjson_mut_obj(doc)!, insertIndex)

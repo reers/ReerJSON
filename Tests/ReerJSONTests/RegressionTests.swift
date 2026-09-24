@@ -471,6 +471,28 @@ struct RegressionTests {
         #expect(try ReerJSONDecoder().decode(Box.self, from: data) == expected)
     }
 
+    // MARK: - JSONValue.description
+
+    @Test(arguments: [
+        #"{"a\"b": "x\"y\nz\\w", "t": "\t\u0001", "u": "é😀/"}"#,
+        #"["a\u0000b", "", {"": [1, -2.5, true, null]}]"#,
+        #"[Infinity, -Infinity, NaN, 1e300, -0.0, 0.1]"#,
+    ])
+    func jsonValueDescriptionIsParseableJSON(json: String) throws {
+        let value = try JSONValue(string: json, options: .allowInfAndNaN)
+        let reparsed = try JSONValue(string: value.description, options: .allowInfAndNaN)
+        #expect(try reparsed.data(options: .allowInfAndNaN) == value.data(options: .allowInfAndNaN), "\(value.description)")
+    }
+
+    @Test func jsonValueDescriptionKeepsFormat() throws {
+        let value = try JSONValue(string: #"{"a": [1, "s", {"b": null}], "c": false}"#)
+        #expect(value.description == #"{"a": [1, "s", {"b": null}], "c": false}"#)
+        #expect(try JSONValue(string: "1.5").description == "1.5")
+        #expect(try JSONValue(string: "-7").description == "-7")
+        #expect(try JSONValue(string: "[18446744073709551615]").description == "[18446744073709551615]")
+        #expect(try JSONValue(string: "[1.50, 2]", options: .numberAsRaw).description == "[1.50, 2]")
+    }
+
     @Test func serializationWriteRejectsInvalidObjects() throws {
         let invalid = JSONError.invalidData("Invalid JSON object")
         let cases: [Any] = [

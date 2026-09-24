@@ -800,23 +800,91 @@ public struct JSONValue: @unchecked Sendable {
 
 extension JSONValue: CustomStringConvertible {
     public var description: String {
-        switch storage {
-        case .null:
-            return "null"
-        case .bool(let b, _):
-            return b ? "true" : "false"
-        case .numberInt(let n, _):
-            return String(n)
-        case .numberDouble(let n, _):
-            return String(n)
-        case .stringPtr(let ptr, _):
-            return "\"\(String(cString: ptr))\""
-        case .object(let ptr):
-            return JSONObject(value: ptr, document: document).description
-        case .array(let ptr):
-            return JSONArray(value: ptr, document: document).description
+        guard let rawValue else { return "null" }
+        return jsonDescription(of: rawValue)
+    }
+}
+
+/// Renders a value as JSON with `": "` and `", "` separators. Strings are
+/// escaped, so the result parses back (with `.allowInfAndNaN` for non-finite
+/// numbers).
+private func jsonDescription(of value: UnsafeMutablePointer<yyjson_val>) -> String {
+    var out: [UInt8] = []
+    appendDescription(of: value, to: &out)
+    return String(decoding: out, as: UTF8.self)
+}
+
+private func appendDescription(of value: UnsafeMutablePointer<yyjson_val>, to out: inout [UInt8]) {
+    switch yyjson_get_type(value) {
+    case YYJSON_TYPE_BOOL:
+        out.append(contentsOf: yyjson_get_bool(value) ? "true".utf8 : "false".utf8)
+    case YYJSON_TYPE_NUM:
+        if yyjson_is_uint(value) {
+            out.append(contentsOf: String(yyjson_get_uint(value)).utf8)
+        } else if yyjson_is_sint(value) {
+            out.append(contentsOf: String(yyjson_get_sint(value)).utf8)
+        } else {
+            let real = yyjson_get_real(value)
+            if real.isNaN {
+                out.append(contentsOf: "NaN".utf8)
+            } else if real.isInfinite {
+                out.append(contentsOf: real < 0 ? "-Infinity".utf8 : "Infinity".utf8)
+            } else {
+                out.append(contentsOf: String(real).utf8)
+            }
+        }
+    case YYJSON_TYPE_RAW:
+        if let raw = yyjson_get_raw(value) {
+            out.append(contentsOf: UnsafeRawBufferPointer(start: raw, count: yyjson_get_len(value)))
+        }
+    case YYJSON_TYPE_STR:
+        if let str = yyjson_get_str(value) {
+            appendQuoted(UnsafeRawBufferPointer(start: str, count: yyjson_get_len(value)), to: &out)
+        }
+    case YYJSON_TYPE_ARR:
+        out.append(UInt8(ascii: "["))
+        var iter = yyjson_arr_iter_with(value)
+        var first = true
+        while let element = yyjson_arr_iter_next(&iter) {
+            if !first { out.append(contentsOf: ", ".utf8) }
+            first = false
+            appendDescription(of: element, to: &out)
+        }
+        out.append(UInt8(ascii: "]"))
+    case YYJSON_TYPE_OBJ:
+        out.append(UInt8(ascii: "{"))
+        var iter = yyjson_obj_iter_with(value)
+        var first = true
+        while let key = yyjson_obj_iter_next(&iter) {
+            if !first { out.append(contentsOf: ", ".utf8) }
+            first = false
+            appendDescription(of: key, to: &out)
+            out.append(contentsOf: ": ".utf8)
+            appendDescription(of: yyjson_obj_iter_get_val(key), to: &out)
+        }
+        out.append(UInt8(ascii: "}"))
+    default:
+        out.append(contentsOf: "null".utf8)
+    }
+}
+
+private func appendQuoted(_ bytes: UnsafeRawBufferPointer, to out: inout [UInt8]) {
+    func hex(_ nibble: UInt8) -> UInt8 { nibble < 10 ? 0x30 + nibble : 0x57 + nibble }
+    out.append(UInt8(ascii: "\""))
+    for byte in bytes {
+        switch byte {
+        case UInt8(ascii: "\""): out.append(contentsOf: #"\""#.utf8)
+        case UInt8(ascii: "\\"): out.append(contentsOf: #"\\"#.utf8)
+        case 0x0A: out.append(contentsOf: #"\n"#.utf8)
+        case 0x0D: out.append(contentsOf: #"\r"#.utf8)
+        case 0x09: out.append(contentsOf: #"\t"#.utf8)
+        case 0x08: out.append(contentsOf: #"\b"#.utf8)
+        case 0x0C: out.append(contentsOf: #"\f"#.utf8)
+        case 0..<0x20: out.append(contentsOf: [0x5C, 0x75, 0x30, 0x30, hex(byte >> 4), hex(byte & 0xF)])
+        default: out.append(byte)
         }
     }
+    out.append(UInt8(ascii: "\""))
 }
 
 // MARK: - JSON Object
@@ -911,11 +979,7 @@ public struct JSONObjectIterator: IteratorProtocol {
 
 extension JSONObject: CustomStringConvertible {
     public var description: String {
-        var parts: [String] = []
-        for (key, value) in self {
-            parts.append("\"\(key)\": \(value.description)")
-        }
-        return "{\(parts.joined(separator: ", "))}"
+        jsonDescription(of: value)
     }
 }
 
@@ -982,8 +1046,7 @@ public struct JSONArrayIterator: IteratorProtocol {
 
 extension JSONArray: CustomStringConvertible {
     public var description: String {
-        let elements = self.map { $0.description }
-        return "[\(elements.joined(separator: ", "))]"
+        jsonDescription(of: value)
     }
 }
 

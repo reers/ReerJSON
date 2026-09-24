@@ -67,6 +67,11 @@ let package = Package(
         .testTarget(
             name: "ReerJSONTests",
             dependencies: ["ReerJSON"],
+            exclude: [
+                "Info.plist",
+                "Models/instruments.json",
+                "Models/json_to_swift.rb",
+            ],
             resources: [
                 .copy("Models/apache_builds.json"),
                 .copy("Models/canada.json"),

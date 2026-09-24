@@ -263,6 +263,36 @@ struct RegressionTests {
         #expect(value["key_1"]?.int64 == 1)
     }
 
+    private struct Thrower: Encodable {
+        func encode(to encoder: Encoder) throws {
+            throw EncodingError.invalidValue(0, .init(codingPath: encoder.codingPath, debugDescription: "boom"))
+        }
+    }
+
+    private struct RecoversFromDictionaryError: Encodable {
+        enum CodingKeys: String, CodingKey { case dict, value }
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            _ = try? container.encode(["inner": Thrower()], forKey: .dict)
+            try container.encode(Thrower(), forKey: .value)
+        }
+    }
+
+    @Test func encoderRestoresCodingPathAfterDictionaryError() throws {
+        func errorPath(_ encode: () throws -> Data) -> [String] {
+            do {
+                _ = try encode()
+            } catch let EncodingError.invalidValue(_, context) {
+                return context.codingPath.map(\.stringValue)
+            } catch {}
+            return ["<no error>"]
+        }
+        let value = RecoversFromDictionaryError()
+        let foundation = errorPath { try JSONEncoder().encode(value) }
+        #expect(foundation == ["value"])
+        #expect(errorPath { try ReerJSONEncoder().encode(value) } == foundation)
+    }
+
     @Test func serializationWriteRejectsInvalidObjects() throws {
         let invalid = JSONError.invalidData("Invalid JSON object")
         let cases: [Any] = [

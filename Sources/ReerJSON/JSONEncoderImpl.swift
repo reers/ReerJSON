@@ -409,14 +409,13 @@ class JSONEncoderImpl: Encoder {
 
     func wrapStringKeyedDictValue(_ dict: [String: Encodable], for additionalKey: CodingKey?) throws -> UnsafeMutablePointer<yyjson_mut_val>? {
         let obj = yyjson_mut_obj(doc)!
-        let savedPath = codingPath
         if let additionalKey { codingPath.append(additionalKey) }
+        defer { if additionalKey != nil { codingPath.removeLast() } }
         for (key, value) in dict {
             let keyVal = wrapString(key)
             let val = try wrapEncodable(value, for: _CodingKey(stringValue: key)!) ?? yyjson_mut_obj(doc)!
             yyjson_mut_obj_add(obj, keyVal, val)
         }
-        codingPath = savedPath
         return obj
     }
 

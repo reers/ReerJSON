@@ -169,9 +169,12 @@ extension JSON {
         } else if yyjson_is_sint(&convertedVal) {
             return T(exactly: yyjson_get_sint(&convertedVal))
         } else if yyjson_is_real(&convertedVal) {
-            let real = unsafe_yyjson_get_real(&convertedVal)
-            if let value = T(exactly: real) { return value }
-            // try Int128/UInt128
+            // An integer literal only reads as real when it overflows 64 bits;
+            // its rounded double must not be accepted (e.g. -2^63 - 1 → Int64.min).
+            if strpbrk(cString, ".eE") != nil, let value = T(exactly: unsafe_yyjson_get_real(&convertedVal)) {
+                return value
+            }
+            // Exact parse for integer literals, e.g. Int128/UInt128.
             return T(String(cString: cString))
         }
         return nil

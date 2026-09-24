@@ -379,6 +379,49 @@ struct RegressionTests {
         #expect(reer.sorted() == foundation.sorted())
     }
 
+    // MARK: - Decoder integers
+
+    private static let integerLiterals = [
+        "0", "-0", "7", "-7", "127", "128", "-128", "-129", "255", "256", "32767", "32768", "65535", "65536",
+        "2147483647", "2147483648", "-2147483648", "-2147483649", "4294967295", "4294967296",
+        "123456789012345678", "-123456789012345678", "999999999999999999", "1000000000000000000",
+        "9223372036854775807", "9223372036854775808", "-9223372036854775808", "-9223372036854775809",
+        "18446744073709551615", "18446744073709551616", "1e2", "1E2", "-1e2", "1.0", "1.5", "-0.0", "1e-2", "12e17",
+    ]
+
+    private struct IntegerBox<T: Codable>: Codable { let v: T }
+
+    private static func compareIntegerDecoding<T: FixedWidthInteger & Codable>(_: T.Type) throws {
+        for literal in integerLiterals {
+            let data = Data("[\(literal)]".utf8)
+            let foundation = try? JSONDecoder().decode([T].self, from: data)
+            let reer = try? ReerJSONDecoder().decode([T].self, from: data)
+            #expect(reer == foundation, "\(T.self) \(literal)")
+            let boxData = Data("{\"v\":\(literal)}".utf8)
+            let keyed = try? ReerJSONDecoder().decode(IntegerBox<T>.self, from: boxData).v
+            #expect(keyed == foundation?.first, "\(T.self) keyed \(literal)")
+        }
+    }
+
+    @Test func decoderIntegersMatchFoundation() throws {
+        try Self.compareIntegerDecoding(Int.self)
+        try Self.compareIntegerDecoding(Int8.self)
+        try Self.compareIntegerDecoding(Int16.self)
+        try Self.compareIntegerDecoding(Int32.self)
+        try Self.compareIntegerDecoding(Int64.self)
+        try Self.compareIntegerDecoding(UInt.self)
+        try Self.compareIntegerDecoding(UInt8.self)
+        try Self.compareIntegerDecoding(UInt16.self)
+        try Self.compareIntegerDecoding(UInt32.self)
+        try Self.compareIntegerDecoding(UInt64.self)
+    }
+
+    @Test func decoderJSON5IntegersStillParse() throws {
+        let decoder = ReerJSONDecoder()
+        decoder.allowsJSON5 = true
+        #expect(try decoder.decode([Int].self, from: Data("[+1, 0x1F, -0x10, 10,]".utf8)) == [1, 31, -16, 10])
+    }
+
     @Test func serializationWriteRejectsInvalidObjects() throws {
         let invalid = JSONError.invalidData("Invalid JSON object")
         let cases: [Any] = [

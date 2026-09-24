@@ -463,6 +463,14 @@ struct RegressionTests {
         }
     }
 
+    @Test func decoderStringsWithNULMatchFoundation() throws {
+        struct Box: Codable, Equatable { let s: String; let a: [String] }
+        let data = Data(#"{"s":"a\u0000b","a":["\u0000","x\u0000\u00e9\ud83d\ude00",""]}"#.utf8)
+        let expected = try JSONDecoder().decode(Box.self, from: data)
+        #expect(expected.s == "a\0b")
+        #expect(try ReerJSONDecoder().decode(Box.self, from: data) == expected)
+    }
+
     @Test func serializationWriteRejectsInvalidObjects() throws {
         let invalid = JSONError.invalidData("Invalid JSON object")
         let cases: [Any] = [

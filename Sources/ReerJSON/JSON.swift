@@ -78,10 +78,6 @@ extension JSON {
     var string: String? {
         guard let cString = yyjson_get_str(pointer) else { return nil }
         let length = yyjson_get_len(pointer)
-        if memchr(cString, 0, length) != nil {
-            let rawBuffer = UnsafeRawBufferPointer(start: cString, count: length)
-            return String(bytes: rawBuffer, encoding: .utf8)
-        }
         let buffer = UnsafeBufferPointer(
             start: UnsafeRawPointer(cString).assumingMemoryBound(to: UInt8.self),
             count: length

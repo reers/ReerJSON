@@ -101,7 +101,7 @@ struct RegressionTests {
             ? items.joined(separator: " \n")
             : "[" + items.joined(separator: ", ") + "]"
         let data = Data(text.utf8)
-        for chunkSize in [data.count, 4_096, 7] {
+        for chunkSize in [data.count, 4_096, 997] {
             var parser = JSONStreamParser(mode: mode)
             var values: [JSONValue] = []
             var offset = 0

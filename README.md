@@ -55,7 +55,7 @@ Mac Catalyst 15, and visionOS 1.
 
 Add dependency in `Package.swift` or project `Package Dependencies`
 ```swift
-.package(url: "https://github.com/reers/ReerJSON.git", from: "1.2.0"),
+.package(url: "https://github.com/reers/ReerJSON.git", from: "1.2.1"),
 ```
 
 Depend on `ReerJSON` in your target.
